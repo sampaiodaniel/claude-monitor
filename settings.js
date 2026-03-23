@@ -42,6 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('save-btn').addEventListener('click', saveSettings);
 
   document.getElementById('history-btn').addEventListener('click', openHistory);
+  document.getElementById('history-nav-btn').addEventListener('click', openHistory);
 
   // Interval slider preview
   document.getElementById('new-interval-value').addEventListener('input', (e) => {
