@@ -1,0 +1,10 @@
+# Test files
+inject-test-data.html
+inject-test-data.js
+
+# Docs (internal only)
+docs/chrome-store-listing.md
+
+# OS
+.DS_Store
+Thumbs.db
