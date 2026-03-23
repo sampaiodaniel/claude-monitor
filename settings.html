@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="container">
+    <div class="page-header">
+      <img class="logo-img" src="icons/icon-48.png" alt="Logo">
+      <div>
+        <h1>Claude Monitor</h1>
+        <p class="subtitle">Configurações</p>
+      </div>
+    </div>
+
+    <!-- Color Intervals -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-icon">🎨</span>
+        <h2>Cores por faixa de uso</h2>
+      </div>
+      <p class="section-desc">Defina as cores das barras e do badge de acordo com a faixa de uso. Cada intervalo vai do valor definido até o próximo.</p>
+
+      <div id="intervals-list" class="intervals-list"></div>
+
+      <div class="interval-add">
+        <div class="interval-add-row">
+          <span class="interval-add-label">A partir de</span>
+          <input type="range" id="new-interval-value" min="0" max="100" step="5" value="50">
+          <span id="new-interval-value-display" class="range-value">50%</span>
+        </div>
+        <div class="interval-add-row">
+          <span class="interval-add-label">Cor</span>
+          <div id="color-picker" class="color-picker"></div>
+        </div>
+        <button id="add-interval-btn" class="btn-add">+ Adicionar faixa</button>
+      </div>
+
+      <button id="reset-intervals-btn" class="btn-reset">Restaurar padrão</button>
+    </div>
+
+    <!-- Alert Thresholds -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-icon">🔔</span>
+        <h2>Alertas</h2>
+      </div>
+      <p class="section-desc">Receba notificações do Windows quando o uso atingir estes valores.</p>
+
+      <div class="toggle-row">
+        <label class="toggle-label" for="notificationsEnabled">Ativar notificações</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notificationsEnabled">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div id="alerts-section">
+        <div id="alert-chips" class="alert-chips"></div>
+        <div class="alert-add-row">
+          <input type="range" id="new-alert" min="10" max="100" step="5" value="50">
+          <span id="new-alert-display" class="range-value">50%</span>
+          <button id="add-alert-btn" class="btn-add">+ Adicionar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Polling -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-icon">⏱️</span>
+        <h2>Intervalo de verificação</h2>
+      </div>
+      <p class="section-desc">Com que frequência o plugin consulta o uso da sua conta.</p>
+
+      <div class="slider-row">
+        <input type="range" id="pollIntervalMinutes" min="1" max="30" step="1" value="5">
+        <span id="poll-value" class="range-value">5 min</span>
+      </div>
+      <div class="slider-hints">
+        <span>1 min</span>
+        <span>30 min</span>
+      </div>
+    </div>
+
+    <!-- Display -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-icon">📊</span>
+        <h2>Exibição</h2>
+      </div>
+
+      <div class="toggle-row">
+        <label class="toggle-label" for="showSonnet">Mostrar uso do Sonnet no popup</label>
+        <label class="toggle-switch">
+          <input type="checkbox" id="showSonnet">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- History -->
+    <div class="section section-flat">
+      <button id="history-btn" class="btn-history">📊 Ver histórico de uso</button>
+    </div>
+
+    <div class="save-bar">
+      <button id="save-btn" class="btn-save">Salvar configurações</button>
+      <span id="status-msg" class="status-msg hidden">✓ Salvo!</span>
+    </div>
+
+    <div class="footer-info">
+      Claude Monitor v1.0.0
+    </div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>

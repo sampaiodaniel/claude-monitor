@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="settings.css">
+  <style>
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-top: 12px;
+    }
+    th {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 2px solid #3a3a5e;
+      color: #a0a0ff;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    td {
+      padding: 6px 10px;
+      border-bottom: 1px solid #2a2a3e;
+    }
+    tr:hover td {
+      background: #222240;
+    }
+    tr.day-header td {
+      background: #222240;
+      color: #a0a0ff;
+      font-weight: 600;
+      font-size: 12px;
+      padding: 10px 10px 6px;
+      border-bottom: 1px solid #3a3a5e;
+    }
+    .pct-cell {
+      font-weight: 600;
+    }
+    .green { color: #4CAF50; }
+    .yellow { color: #FFC107; }
+    .orange { color: #FF9800; }
+    .red { color: #F44336; }
+    .page-title-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    .page-title-left {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .page-logo {
+      width: 40px;
+      height: 40px;
+    }
+    .page-title-row h1 {
+      font-size: 20px;
+      font-weight: 700;
+      color: #fff;
+      line-height: 1.2;
+    }
+    .page-subtitle {
+      font-size: 12px;
+      color: #888;
+      margin-top: 2px;
+    }
+    .btn-settings {
+      background: #222240;
+      border: 1px solid #3a3a5e;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 18px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .btn-settings:hover {
+      background: #3a3a5e;
+    }
+    .empty-msg {
+      text-align: center;
+      color: #666;
+      padding: 40px 16px;
+      font-size: 14px;
+    }
+    .stats-summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 8px;
+      margin-bottom: 20px;
+    }
+    .stat-card {
+      background: #222240;
+      border-radius: 8px;
+      padding: 12px 16px;
+    }
+    .stat-card .stat-label {
+      font-size: 11px;
+      color: #a0a0b0;
+      margin-bottom: 4px;
+    }
+    .stat-card .stat-value {
+      font-size: 20px;
+      font-weight: 700;
+    }
+    .chart-container {
+      background: #222240;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .chart-container h2 {
+      font-size: 14px;
+      color: #a0a0ff;
+      margin-bottom: 12px;
+    }
+    canvas {
+      width: 100% !important;
+      height: 220px !important;
+    }
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .chart-header h2 {
+      margin-bottom: 0;
+    }
+    .chart-pagination {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .chart-nav {
+      background: #2a2a5e;
+      color: #a0a0ff;
+      border: 1px solid #3a3a7e;
+      border-radius: 4px;
+      width: 28px;
+      height: 28px;
+      font-size: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .chart-nav:hover:not(:disabled) {
+      background: #3a3a6e;
+    }
+    .chart-nav:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+    .chart-page-info {
+      font-size: 11px;
+      color: #888;
+      min-width: 60px;
+      text-align: center;
+    }
+    .actions {
+      margin-top: 16px;
+      display: flex;
+      gap: 8px;
+    }
+    .btn-secondary {
+      padding: 6px 16px;
+      background: #2a2a5e;
+      color: #a0a0ff;
+      border: 1px solid #3a3a7e;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .btn-secondary:hover {
+      background: #3a3a6e;
+    }
+    .btn-secondary:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .btn-secondary:disabled:hover {
+      background: #2a2a5e;
+    }
+    .pagination {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      margin-top: 16px;
+      padding: 12px 0;
+    }
+    .page-info {
+      font-size: 12px;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="container" style="max-width: 720px;">
+    <div class="page-title-row">
+      <div class="page-title-left">
+        <img src="icons/icon-48.png" class="page-logo" alt="Logo">
+        <div>
+          <h1>Claude Monitor</h1>
+          <p class="page-subtitle">Histórico de Uso</p>
+        </div>
+      </div>
+      <button id="settings-btn" class="btn-settings" title="Configurações">⚙️</button>
+    </div>
+
+    <div id="stats-summary" class="stats-summary hidden">
+      <div class="stat-card">
+        <div class="stat-label">Média por sessão</div>
+        <div class="stat-value" id="avg-session">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Sessões registradas</div>
+        <div class="stat-value" id="total-sessions">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Média semanal</div>
+        <div class="stat-value" id="avg-weekly">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Semanas com dados</div>
+        <div class="stat-value" id="total-weeks">—</div>
+      </div>
+    </div>
+
+    <div id="chart-section" class="chart-container hidden">
+      <div class="chart-header">
+        <h2>Uso por sessão (por dia)</h2>
+        <div id="chart-pagination" class="chart-pagination hidden">
+          <button id="chart-prev" class="chart-nav" disabled>‹</button>
+          <span id="chart-page-info" class="chart-page-info"></span>
+          <button id="chart-next" class="chart-nav" disabled>›</button>
+        </div>
+      </div>
+      <canvas id="usage-chart"></canvas>
+    </div>
+
+    <div id="table-container"></div>
+
+    <div id="pagination" class="pagination hidden">
+      <button id="prev-btn" class="btn-secondary" disabled>← Anterior</button>
+      <span id="page-info" class="page-info"></span>
+      <button id="next-btn" class="btn-secondary" disabled>Próxima →</button>
+    </div>
+  </div>
+
+  <script src="history.js"></script>
+</body>
+</html>

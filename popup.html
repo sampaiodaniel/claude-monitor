@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="header">
+    <span class="title">Claude Monitor</span>
+    <button id="settings-btn" class="icon-btn" title="Configurações">⚙️</button>
+  </div>
+
+  <div id="login-screen" class="login-screen hidden">
+    <div class="login-icon">🔑</div>
+    <div class="login-title">Conecte sua conta</div>
+    <div class="login-desc">Faça login no Claude para monitorar seu uso.</div>
+    <button id="login-btn" class="login-btn">Abrir Claude.ai</button>
+    <button id="login-retry" class="login-retry">Já fiz login — verificar</button>
+  </div>
+
+  <div id="content" class="hidden">
+    <div id="error-msg" class="error hidden"></div>
+
+    <div class="usage-section primary">
+      <div class="label">Sessão atual</div>
+      <div class="bar-container">
+        <div id="session-bar" class="bar"></div>
+      </div>
+      <div class="stats">
+        <span id="session-pct" class="pct">—%</span>
+        <span id="session-reset" class="reset">—</span>
+      </div>
+    </div>
+
+    <hr class="divider">
+
+    <div class="usage-section secondary">
+      <div class="label">Semanal (todos os modelos)</div>
+      <div class="bar-container">
+        <div id="weekly-bar" class="bar"></div>
+      </div>
+      <div class="stats">
+        <span id="weekly-pct" class="pct">—%</span>
+        <span id="weekly-reset" class="reset">—</span>
+      </div>
+    </div>
+
+    <div id="sonnet-section" class="usage-section secondary hidden">
+      <hr class="divider">
+      <div class="label">Sonnet</div>
+      <div class="bar-container">
+        <div id="sonnet-bar" class="bar"></div>
+      </div>
+      <div class="stats">
+        <span id="sonnet-pct" class="pct">—%</span>
+        <span id="sonnet-reset" class="reset">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span id="last-updated">—</span>
+    <span class="footer-actions">
+      <button id="history-btn" class="icon-btn" title="Histórico de uso">📊</button>
+      <button id="refresh-btn" class="icon-btn" title="Atualizar agora">🔄</button>
+    </span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
