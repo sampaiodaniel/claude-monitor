@@ -5,6 +5,7 @@
   "description": "Monitor Claude AI usage limits with threshold alerts",
   "permissions": [
     "alarms",
+    "cookies",
     "notifications",
     "storage",
     "tabs"

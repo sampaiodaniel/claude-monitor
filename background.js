@@ -60,6 +60,19 @@ async function getSettings() {
   });
 }
 
+// -- Fetch helper with explicit cookies (Edge/Chromium compatibility) --
+async function fetchWithCookies(url) {
+  // First try credentials: 'include' (works in Chrome)
+  // If that fails with 401/403, fallback to explicit cookie header (Edge)
+  const cookies = await chrome.cookies.getAll({ domain: 'claude.ai' });
+  const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+  return fetch(url, {
+    credentials: 'include',
+    headers: cookieHeader ? { 'Cookie': cookieHeader } : {}
+  });
+}
+
 // -- Auto-discover org UUID --
 async function getOrgUuid() {
   const cached = await new Promise(resolve =>
@@ -68,7 +81,7 @@ async function getOrgUuid() {
   if (cached.orgUuid) return cached.orgUuid;
 
   try {
-    const resp = await fetch('https://claude.ai/api/organizations', { credentials: 'include' });
+    const resp = await fetchWithCookies('https://claude.ai/api/organizations');
     if (!resp.ok) return null;
     const orgs = await resp.json();
     if (orgs.length > 0) {
@@ -95,7 +108,7 @@ async function fetchUsage() {
   const url = `https://claude.ai/api/organizations/${orgUuid}/usage`;
 
   try {
-    const resp = await fetch(url, { credentials: 'include' });
+    const resp = await fetchWithCookies(url);
 
     if (!resp.ok) {
       if (resp.status === 401 || resp.status === 403) {
