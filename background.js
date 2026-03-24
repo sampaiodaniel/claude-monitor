@@ -19,10 +19,7 @@ const DEFAULT_SETTINGS = {
 
 const GRAY = '#9E9E9E';
 
-// -- State --
-let notifiedThresholds = { session: new Set(), weekly: new Set() };
-let lastSessionResetAt = null;
-let lastWeeklyResetAt = null;
+// -- State is persisted in chrome.storage.local to survive SW restarts --
 
 // -- Init --
 chrome.runtime.onInstalled.addListener(() => {
@@ -110,7 +107,7 @@ async function fetchUsage() {
 
     saveLatest(usage);
     updateBadge(usage, settings);
-    checkAlerts(usage, settings);
+    await checkAlerts(usage, settings);
     maybeLogUsage(usage, settings);
   } catch (err) {
     setBadgeError();
@@ -159,45 +156,75 @@ function setBadgeError() {
 }
 
 // -- Alerts (Notifications) --
-function checkAlerts(usage, settings) {
+// State is persisted in chrome.storage.local so it survives SW restarts
+async function loadNotifiedState() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('notifiedState', (result) => {
+      resolve(result.notifiedState || {
+        sessionNotified: [],
+        weeklyNotified: [],
+        lastSessionResetAt: null,
+        lastWeeklyResetAt: null
+      });
+    });
+  });
+}
+
+async function saveNotifiedState(state) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set({ notifiedState: state }, resolve);
+  });
+}
+
+async function checkAlerts(usage, settings) {
   if (!settings.notificationsEnabled) return;
 
   const alerts = settings.alerts || DEFAULT_ALERTS;
+  const state = await loadNotifiedState();
+  let changed = false;
 
-  // Reset cycle detection
-  if (usage.sessionResetsAt !== lastSessionResetAt) {
-    notifiedThresholds.session.clear();
-    lastSessionResetAt = usage.sessionResetsAt;
+  // Reset cycle detection - clear flags when resets_at changes
+  if (usage.sessionResetsAt && usage.sessionResetsAt !== state.lastSessionResetAt) {
+    state.sessionNotified = [];
+    state.lastSessionResetAt = usage.sessionResetsAt;
+    changed = true;
   }
-  if (usage.weeklyResetsAt !== lastWeeklyResetAt) {
-    notifiedThresholds.weekly.clear();
-    lastWeeklyResetAt = usage.weeklyResetsAt;
+  if (usage.weeklyResetsAt && usage.weeklyResetsAt !== state.lastWeeklyResetAt) {
+    state.weeklyNotified = [];
+    state.lastWeeklyResetAt = usage.weeklyResetsAt;
+    changed = true;
   }
 
   // Session alerts
   for (const threshold of alerts) {
-    if (usage.session >= threshold && !notifiedThresholds.session.has(threshold)) {
-      notifiedThresholds.session.add(threshold);
+    if (usage.session >= threshold && !state.sessionNotified.includes(threshold)) {
+      state.sessionNotified.push(threshold);
+      changed = true;
       const resetIn = formatTimeUntil(usage.sessionResetsAt);
       fireNotification(
-        `session-${threshold}-${Date.now()}`,
-        `Claude: Sessão em ${usage.session}%`,
-        `Limite de sessão atingiu ${threshold}%. Reseta em ${resetIn}.`
+        `session-${threshold}`,
+        `Claude Monitor: Sessão atingiu ${threshold}%`,
+        `Uso atual: ${usage.session}%. Reseta em ${resetIn}.`
       );
     }
   }
 
   // Weekly alerts
   for (const threshold of alerts) {
-    if (usage.weekly >= threshold && !notifiedThresholds.weekly.has(threshold)) {
-      notifiedThresholds.weekly.add(threshold);
+    if (usage.weekly >= threshold && !state.weeklyNotified.includes(threshold)) {
+      state.weeklyNotified.push(threshold);
+      changed = true;
       const resetIn = formatTimeUntil(usage.weeklyResetsAt);
       fireNotification(
-        `weekly-${threshold}-${Date.now()}`,
-        `Claude: Semanal em ${usage.weekly}%`,
-        `Limite semanal atingiu ${threshold}%. Reseta em ${resetIn}.`
+        `weekly-${threshold}`,
+        `Claude Monitor: Semanal atingiu ${threshold}%`,
+        `Uso atual: ${usage.weekly}%. Reseta em ${resetIn}.`
       );
     }
+  }
+
+  if (changed) {
+    await saveNotifiedState(state);
   }
 }
 
