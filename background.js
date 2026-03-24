@@ -43,10 +43,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
 });
 
-async function setupAlarm() {
+const CRITICAL_THRESHOLD = 95;
+const CRITICAL_POLL_MINUTES = 1;
+
+async function setupAlarm(overrideMinutes) {
   const settings = await getSettings();
+  const minutes = overrideMinutes || settings.pollIntervalMinutes;
   chrome.alarms.create('pollUsage', {
-    periodInMinutes: settings.pollIntervalMinutes
+    periodInMinutes: minutes
   });
 }
 
@@ -109,6 +113,15 @@ async function fetchUsage() {
     updateBadge(usage, settings);
     await checkAlerts(usage, settings);
     maybeLogUsage(usage, settings);
+
+    // Turbo mode: poll every 1 min when session >= 95%
+    const isCritical = usage.session !== null && usage.session >= CRITICAL_THRESHOLD;
+    const currentInterval = isCritical ? CRITICAL_POLL_MINUTES : settings.pollIntervalMinutes;
+    const stored = await new Promise(r => chrome.storage.local.get('currentPollMinutes', r));
+    if (stored.currentPollMinutes !== currentInterval) {
+      await setupAlarm(currentInterval);
+      chrome.storage.local.set({ currentPollMinutes: currentInterval });
+    }
   } catch (err) {
     setBadgeError();
     saveLatest({ error: err.message });
