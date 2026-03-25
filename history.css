@@ -193,3 +193,24 @@ canvas {
 .btn-nav:hover {
   background: #252540;
 }
+
+/* Footer */
+.footer-actions {
+  text-align: center;
+  margin-top: 24px;
+  padding: 12px 0;
+}
+
+.btn-link-subtle {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color 0.2s;
+}
+
+.btn-link-subtle:hover {
+  color: #e74c4c;
+}

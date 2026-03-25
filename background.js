@@ -291,39 +291,56 @@ function saveLatest(usage) {
 }
 
 // -- Storage: Usage Log --
+// Strategy: always keep the latest snapshot of the current session.
+// When resets_at changes (new session started), log the PREVIOUS session's
+// final values. This guarantees we capture the peak usage even if the session
+// resets between polls.
 async function maybeLogUsage(usage, settings) {
   if (!usage.sessionResetsAt) return;
 
   const now = Date.now();
-  const resetsAt = new Date(usage.sessionResetsAt).getTime();
-  const timeUntilResetMs = resetsAt - now;
-  const pollIntervalMs = settings.pollIntervalMinutes * 60 * 1000;
-
-  if (timeUntilResetMs > pollIntervalMs || timeUntilResetMs <= 0) return;
+  const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
   const result = await new Promise(resolve =>
-    chrome.storage.local.get({ usageLog: [], lastLoggedResetAt: null }, resolve)
+    chrome.storage.local.get({
+      usageLog: [],
+      previousSession: null,
+      lastTrackedResetAt: null
+    }, resolve)
   );
 
-  if (result.lastLoggedResetAt === usage.sessionResetsAt) return;
-
-  const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
   const log = result.usageLog;
+  const prevResetAt = result.lastTrackedResetAt;
 
-  log.push({
+  // Detect session change: resets_at is different from what we were tracking
+  if (prevResetAt && prevResetAt !== usage.sessionResetsAt && result.previousSession) {
+    // The previous session ended — log its final snapshot
+    log.push({
+      ts: result.previousSession.ts,
+      session: result.previousSession.session,
+      weekly: result.previousSession.weekly,
+      sonnet: result.previousSession.sonnet,
+      sessionResetsAt: prevResetAt,
+      weeklyResetsAt: result.previousSession.weeklyResetsAt
+    });
+  }
+
+  // Always update the current session snapshot (overwrite, not accumulate)
+  const currentSnapshot = {
     ts: now,
     session: usage.session,
     weekly: usage.weekly,
     sonnet: usage.sonnet,
-    sessionResetsAt: usage.sessionResetsAt,
     weeklyResetsAt: usage.weeklyResetsAt
-  });
+  };
 
+  // Prune old entries
   const pruned = log.filter(entry => (now - entry.ts) < MAX_AGE_MS);
 
   chrome.storage.local.set({
     usageLog: pruned,
-    lastLoggedResetAt: usage.sessionResetsAt
+    previousSession: currentSnapshot,
+    lastTrackedResetAt: usage.sessionResetsAt
   });
 }
 
@@ -342,6 +359,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.action === 'injectTestData') {
     chrome.storage.local.set({ usageLog: msg.data }, () => sendResponse('ok'));
+    return true;
+  }
+  if (msg.action === 'clearUsageLog') {
+    chrome.storage.local.set({
+      usageLog: [],
+      previousSession: null,
+      lastTrackedResetAt: null,
+      lastLoggedResetAt: null
+    }, () => sendResponse('ok'));
     return true;
   }
 });

@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chart-prev').addEventListener('click', () => { currentPage--; renderPage(); });
   document.getElementById('chart-next').addEventListener('click', () => { currentPage++; renderPage(); });
   document.getElementById('settings-btn').addEventListener('click', openSettings);
+  document.getElementById('clear-log-btn').addEventListener('click', clearLog);
   loadHistory();
 });
 
@@ -35,6 +36,16 @@ async function openSettings() {
     return;
   }
   chrome.runtime.openOptionsPage();
+}
+
+function clearLog() {
+  if (!confirm('Tem certeza que deseja limpar todo o histórico de uso?')) return;
+  chrome.runtime.sendMessage({ action: 'clearUsageLog' }, () => {
+    fullLog = [];
+    latestUsage = null;
+    currentPage = 0;
+    renderPage();
+  });
 }
 
 function loadHistory() {
