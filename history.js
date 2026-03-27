@@ -232,7 +232,7 @@ function renderChart(log, current) {
     const date = new Date(entry.ts);
     const dayKey = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     if (!byDay[dayKey]) byDay[dayKey] = [];
-    byDay[dayKey].push({ value: entry.session, isCurrent: false, resetsAt: entry.sessionResetsAt });
+    byDay[dayKey].push({ value: entry.session, isCurrent: false, resetsAt: entry.sessionResetsAt, ts: entry.ts });
   }
 
   if (current && current.session !== null && current.session !== undefined && !current.error) {
@@ -251,12 +251,12 @@ function renderChart(log, current) {
     }
 
     if (!byDay[todayKey]) byDay[todayKey] = [];
-    byDay[todayKey].push({ value: current.session, isCurrent: true });
+    byDay[todayKey].push({ value: current.session, isCurrent: true, ts: now.getTime() });
   }
 
-  // Ensure bars within each day are oldest-first (chronological)
+  // Sort bars within each day oldest-first (chronological: left=oldest, right=newest)
   for (const key of Object.keys(byDay)) {
-    byDay[key].reverse();
+    byDay[key].sort((a, b) => a.ts - b.ts);
   }
 
   const days = Object.keys(byDay);
