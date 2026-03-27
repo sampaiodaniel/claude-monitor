@@ -222,25 +222,26 @@ function renderChart(log, current) {
     const date = new Date(entry.ts);
     const dayKey = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     if (!byDay[dayKey]) byDay[dayKey] = [];
-    byDay[dayKey].push({ value: entry.session, isCurrent: false });
+    byDay[dayKey].push({ value: entry.session, isCurrent: false, resetsAt: entry.sessionResetsAt });
   }
 
   if (current && current.session !== null && current.session !== undefined && !current.error) {
-    // Only add current session if it's not already in the log (avoid duplicate bar)
     const currentResetAt = current.sessionResetsAt;
     const THREE_HOURS = 3 * 60 * 60 * 1000;
-    const alreadyInLog = currentResetAt && log.some(e => {
-      if (!e.sessionResetsAt) return false;
-      const diff = Math.abs(new Date(e.sessionResetsAt).getTime() - new Date(currentResetAt).getTime());
-      return diff < THREE_HOURS;
-    });
+    const now = new Date();
+    const todayKey = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
-    if (!alreadyInLog) {
-      const now = new Date();
-      const todayKey = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-      if (!byDay[todayKey]) byDay[todayKey] = [];
-      byDay[todayKey].push({ value: current.session, isCurrent: true });
+    // Replace stale log entry with live current session data
+    if (currentResetAt && byDay[todayKey]) {
+      byDay[todayKey] = byDay[todayKey].filter(e => {
+        if (!e.resetsAt) return true;
+        const diff = Math.abs(new Date(e.resetsAt).getTime() - new Date(currentResetAt).getTime());
+        return diff >= THREE_HOURS; // keep entries from different sessions
+      });
     }
+
+    if (!byDay[todayKey]) byDay[todayKey] = [];
+    byDay[todayKey].push({ value: current.session, isCurrent: true });
   }
 
   const days = Object.keys(byDay);
