@@ -218,7 +218,7 @@ function renderChart(log, current) {
 
   const byDay = {};
   for (const entry of log) {
-    if (entry.session === null || entry.session === undefined || entry.session === 0) continue;
+    if (entry.session === null || entry.session === undefined) continue;
     const date = new Date(entry.ts);
     const dayKey = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     if (!byDay[dayKey]) byDay[dayKey] = [];
@@ -291,7 +291,7 @@ function renderChart(log, current) {
   const numGaps = dayGroups.length - 1;
   const innerGap = 2; // px between bars within same day
   const barWidth = Math.max(6, Math.min(18, chartW / (totalBars + numGaps * 1.2)));
-  const gapWidth = barWidth * 1.2; // gap between days (slightly wider than a bar)
+  const gapWidth = barWidth * 2; // gap between days (clearly wider than bars)
   const totalInnerGaps = dayGroups.reduce((sum, g) => sum + Math.max(0, g.entries.length - 1), 0);
   const totalWidth = totalBars * barWidth + numGaps * gapWidth + totalInnerGaps * innerGap;
   const marginLeft = barWidth; // ensure first bar doesn't sit on the axis
@@ -342,7 +342,7 @@ function renderChart(log, current) {
 
   // Bars
   for (const bp of barPositions) {
-    const barH = (bp.value / 100) * chartH;
+    const barH = Math.max(2, (bp.value / 100) * chartH); // min 2px for 0% bars
     const y = padTop + chartH - barH;
 
     ctx.fillStyle = resolveColor(bp.value);
