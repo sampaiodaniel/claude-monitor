@@ -106,31 +106,34 @@ function buildDayPages() {
   pages = [];
   if (fullLog.length === 0) return;
 
-  // Group entries by day key
-  const dayGroups = [];
-  let currentDay = null;
-  let currentGroup = [];
+  // fullLog is sorted newest-first. We need to group by day and paginate
+  // oldest-first so that older pages are full and only the last page
+  // (most recent) can have leftover space.
+
+  // Group entries by day key (preserving newest-first order within days)
+  const dayGroupsMap = {};
+  const dayOrder = [];
 
   for (const entry of fullLog) {
     const date = new Date(entry.ts);
     const dayKey = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-    if (dayKey !== currentDay) {
-      if (currentGroup.length > 0) dayGroups.push(currentGroup);
-      currentGroup = [entry];
-      currentDay = dayKey;
-    } else {
-      currentGroup.push(entry);
+    if (!dayGroupsMap[dayKey]) {
+      dayGroupsMap[dayKey] = [];
+      dayOrder.push(dayKey);
     }
+    dayGroupsMap[dayKey].push(entry);
   }
-  if (currentGroup.length > 0) dayGroups.push(currentGroup);
 
-  // Fill pages: add full days until exceeding MAX_BARS_PER_PAGE
+  // Reverse to get oldest-first for pagination
+  dayOrder.reverse();
+  const dayGroups = dayOrder.map(key => dayGroupsMap[key]);
+
+  // Fill pages oldest-first: older pages are full, last page may have space
   let currentPageEntries = [];
   let currentBarCount = 0;
 
   for (const group of dayGroups) {
     if (currentBarCount > 0 && currentBarCount + group.length > MAX_BARS_PER_PAGE) {
-      // This day doesn't fit, start new page
       pages.push(currentPageEntries);
       currentPageEntries = [...group];
       currentBarCount = group.length;
@@ -140,6 +143,9 @@ function buildDayPages() {
     }
   }
   if (currentPageEntries.length > 0) pages.push(currentPageEntries);
+
+  // Start on the last page (most recent data)
+  currentPage = pages.length - 1;
 }
 
 function renderPage() {
@@ -291,7 +297,7 @@ function renderChart(log, current) {
   const numGaps = dayGroups.length - 1;
   const innerGap = 2; // px between bars within same day
   const barWidth = Math.max(6, Math.min(18, chartW / (totalBars + numGaps * 1.2)));
-  const gapWidth = barWidth * 2; // gap between days (clearly wider than bars)
+  const gapWidth = barWidth * 1.2; // gap between days
   const totalInnerGaps = dayGroups.reduce((sum, g) => sum + Math.max(0, g.entries.length - 1), 0);
   const totalWidth = totalBars * barWidth + numGaps * gapWidth + totalInnerGaps * innerGap;
   const marginLeft = barWidth; // ensure first bar doesn't sit on the axis
