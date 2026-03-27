@@ -226,10 +226,21 @@ function renderChart(log, current) {
   }
 
   if (current && current.session !== null && current.session !== undefined && !current.error) {
-    const now = new Date();
-    const todayKey = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-    if (!byDay[todayKey]) byDay[todayKey] = [];
-    byDay[todayKey].push({ value: current.session, isCurrent: true });
+    // Only add current session if it's not already in the log (avoid duplicate bar)
+    const currentResetAt = current.sessionResetsAt;
+    const THREE_HOURS = 3 * 60 * 60 * 1000;
+    const alreadyInLog = currentResetAt && log.some(e => {
+      if (!e.sessionResetsAt) return false;
+      const diff = Math.abs(new Date(e.sessionResetsAt).getTime() - new Date(currentResetAt).getTime());
+      return diff < THREE_HOURS;
+    });
+
+    if (!alreadyInLog) {
+      const now = new Date();
+      const todayKey = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+      if (!byDay[todayKey]) byDay[todayKey] = [];
+      byDay[todayKey].push({ value: current.session, isCurrent: true });
+    }
   }
 
   const days = Object.keys(byDay);
