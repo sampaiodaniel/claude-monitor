@@ -291,10 +291,10 @@ function saveLatest(usage) {
 }
 
 // -- Storage: Usage Log --
-// Strategy: always keep the latest snapshot of the current session.
-// When resets_at changes (new session started), log the PREVIOUS session's
-// final values. This guarantees we capture the peak usage even if the session
-// resets between polls.
+// Two capture strategies combined:
+// 1. When resets_at changes (new session detected), log the previous session's final snapshot
+// 2. Fallback: when within 5 min of reset, log once per session (in case SW misses the transition)
+// The previousSession is updated every poll but ONLY pushed to usageLog on session change.
 async function maybeLogUsage(usage, settings) {
   if (!usage.sessionResetsAt) return;
 
@@ -305,16 +305,17 @@ async function maybeLogUsage(usage, settings) {
     chrome.storage.local.get({
       usageLog: [],
       previousSession: null,
-      lastTrackedResetAt: null
+      lastTrackedResetAt: null,
+      lastLoggedResetAt: null
     }, resolve)
   );
 
   const log = result.usageLog;
   const prevResetAt = result.lastTrackedResetAt;
+  let shouldSave = false;
 
-  // Detect session change: resets_at is different from what we were tracking
+  // Strategy 1: Detect session change — log the PREVIOUS session's final values
   if (prevResetAt && prevResetAt !== usage.sessionResetsAt && result.previousSession) {
-    // The previous session ended — log its final snapshot
     log.push({
       ts: result.previousSession.ts,
       session: result.previousSession.session,
@@ -323,9 +324,26 @@ async function maybeLogUsage(usage, settings) {
       sessionResetsAt: prevResetAt,
       weeklyResetsAt: result.previousSession.weeklyResetsAt
     });
+    shouldSave = true;
   }
 
-  // Always update the current session snapshot (overwrite, not accumulate)
+  // Strategy 2: Fallback — within 5 min of reset, log once if not already logged
+  const resetsAt = new Date(usage.sessionResetsAt).getTime();
+  const timeUntilResetMs = resetsAt - now;
+  if (timeUntilResetMs > 0 && timeUntilResetMs <= 5 * 60 * 1000
+      && result.lastLoggedResetAt !== usage.sessionResetsAt) {
+    log.push({
+      ts: now,
+      session: usage.session,
+      weekly: usage.weekly,
+      sonnet: usage.sonnet,
+      sessionResetsAt: usage.sessionResetsAt,
+      weeklyResetsAt: usage.weeklyResetsAt
+    });
+    shouldSave = true;
+  }
+
+  // Always update the snapshot (no push to log — just overwrites in storage)
   const currentSnapshot = {
     ts: now,
     session: usage.session,
@@ -335,12 +353,13 @@ async function maybeLogUsage(usage, settings) {
   };
 
   // Prune old entries
-  const pruned = log.filter(entry => (now - entry.ts) < MAX_AGE_MS);
+  const pruned = shouldSave ? log.filter(entry => (now - entry.ts) < MAX_AGE_MS) : result.usageLog;
 
   chrome.storage.local.set({
     usageLog: pruned,
     previousSession: currentSnapshot,
-    lastTrackedResetAt: usage.sessionResetsAt
+    lastTrackedResetAt: usage.sessionResetsAt,
+    lastLoggedResetAt: shouldSave ? usage.sessionResetsAt : result.lastLoggedResetAt
   });
 }
 
