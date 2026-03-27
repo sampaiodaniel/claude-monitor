@@ -244,6 +244,11 @@ function renderChart(log, current) {
     byDay[todayKey].push({ value: current.session, isCurrent: true });
   }
 
+  // Ensure bars within each day are oldest-first (chronological)
+  for (const key of Object.keys(byDay)) {
+    byDay[key].reverse();
+  }
+
   const days = Object.keys(byDay);
   days.sort((a, b) => {
     const [da, ma] = a.split('/').map(Number);
