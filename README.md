@@ -5,7 +5,8 @@
 <h1 align="center">Claude Monitor</h1>
 
 <p align="center">
-  <strong>Chrome extension to monitor your Claude AI usage in real time</strong><br>
+  <strong>Browser extension to monitor your Claude AI usage in real time</strong><br>
+  <em>Chrome &bull; Edge &bull; Firefox</em><br>
   Never hit your limits unexpectedly again.
 </p>
 
@@ -63,16 +64,28 @@ If you use Claude daily (especially Claude Code), you know the frustration of hi
 ### From Chrome Web Store
 *(Coming soon)*
 
-### Manual (Developer Mode)
+### Chrome / Edge (Developer Mode)
 1. Clone this repository:
    ```bash
    git clone https://github.com/sampaiodaniel/claude-monitor.git
    ```
-2. Open `chrome://extensions` in Chrome
+2. Open `chrome://extensions` (Chrome) or `edge://extensions` (Edge)
 3. Enable **Developer mode** (toggle in the top right)
 4. Click **Load unpacked** and select the `claude-monitor` folder
 5. Log in to [claude.ai](https://claude.ai) if you haven't already
 6. The badge will start showing your current usage
+
+### Firefox (Developer Mode)
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/sampaiodaniel/claude-monitor.git
+   ```
+2. Open `about:debugging#/runtime/this-firefox`
+3. Click **Load Temporary Add-on**
+4. Select the `manifest.firefox.json` file from the `claude-monitor` folder
+5. Log in to [claude.ai](https://claude.ai) if you haven't already
+
+> **Note:** For permanent Firefox installation, use the build script (`bash build.sh`) to generate the `.zip` and install it as a signed add-on.
 
 ## How It Works
 
@@ -111,7 +124,7 @@ How often the extension checks your usage. Default: 5 minutes. Range: 1-30 minut
 
 ## Tech Stack
 
-- Chrome Extension Manifest V3
+- Manifest V3 (Chrome/Edge) + Manifest V3 with Gecko adapter (Firefox)
 - Vanilla JavaScript (no frameworks, no dependencies)
 - HTML/CSS with dark theme
 - Canvas API for charts
@@ -119,9 +132,21 @@ How often the extension checks your usage. Default: 5 minutes. Range: 1-30 minut
 - `chrome.alarms` for periodic polling
 - `chrome.notifications` for Windows toast alerts
 
+## Building
+
+To generate distributable `.zip` files for Chrome and Firefox:
+
+```bash
+bash build.sh
+```
+
+Output in `dist/`:
+- `claude-monitor-X.Y.Z-chrome.zip`
+- `claude-monitor-X.Y.Z-firefox.zip`
+
 ## Requirements
 
-- Google Chrome (or Chromium-based browser)
+- Google Chrome, Microsoft Edge, or Firefox 109+
 - Active Claude account (Pro, Team, or Enterprise)
 - Logged in to [claude.ai](https://claude.ai)
 

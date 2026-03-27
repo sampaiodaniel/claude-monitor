@@ -5,6 +5,9 @@ inject-test-data.js
 # Docs (internal only)
 docs/chrome-store-listing.md
 
+# Build output
+dist/
+
 # OS
 .DS_Store
 Thumbs.db
