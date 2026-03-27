@@ -106,35 +106,38 @@ function buildDayPages() {
   pages = [];
   if (fullLog.length === 0) return;
 
-  // fullLog is sorted newest-first. We need to group by day and paginate
-  // oldest-first so that older pages are full and only the last page
-  // (most recent) can have leftover space.
-
-  // Group entries by day key (preserving newest-first order within days)
-  const dayGroupsMap = {};
-  const dayOrder = [];
+  // fullLog is sorted newest-first. Group by day (newest-first order).
+  const dayGroups = [];
+  let currentDay = null;
+  let currentGroup = [];
 
   for (const entry of fullLog) {
     const date = new Date(entry.ts);
     const dayKey = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
-    if (!dayGroupsMap[dayKey]) {
-      dayGroupsMap[dayKey] = [];
-      dayOrder.push(dayKey);
+    if (dayKey !== currentDay) {
+      if (currentGroup.length > 0) dayGroups.push(currentGroup);
+      currentGroup = [entry];
+      currentDay = dayKey;
+    } else {
+      currentGroup.push(entry);
     }
-    dayGroupsMap[dayKey].push(entry);
   }
+  if (currentGroup.length > 0) dayGroups.push(currentGroup);
 
-  // Reverse to get oldest-first for pagination
-  dayOrder.reverse();
-  const dayGroups = dayOrder.map(key => dayGroupsMap[key]);
+  // dayGroups is newest-first: [today, yesterday, ...]
+  // We want page 1 = most recent, last page = oldest.
+  // Leftover space should be on the LAST page (oldest), not the first.
+  // So we paginate from the END (oldest) backwards, then reverse.
 
-  // Fill pages oldest-first: older pages are full, last page may have space
+  // Reverse to oldest-first for packing
+  const oldestFirst = [...dayGroups].reverse();
+  const packedPages = [];
   let currentPageEntries = [];
   let currentBarCount = 0;
 
-  for (const group of dayGroups) {
+  for (const group of oldestFirst) {
     if (currentBarCount > 0 && currentBarCount + group.length > MAX_BARS_PER_PAGE) {
-      pages.push(currentPageEntries);
+      packedPages.push(currentPageEntries);
       currentPageEntries = [...group];
       currentBarCount = group.length;
     } else {
@@ -142,10 +145,11 @@ function buildDayPages() {
       currentBarCount += group.length;
     }
   }
-  if (currentPageEntries.length > 0) pages.push(currentPageEntries);
+  if (currentPageEntries.length > 0) packedPages.push(currentPageEntries);
 
-  // Start on the last page (most recent data)
-  currentPage = pages.length - 1;
+  // packedPages is oldest-first. Reverse so page 1 = most recent.
+  pages = packedPages.reverse();
+  currentPage = 0;
 }
 
 function renderPage() {
