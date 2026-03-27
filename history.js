@@ -218,7 +218,7 @@ function renderChart(log, current) {
 
   const byDay = {};
   for (const entry of log) {
-    if (entry.session === null || entry.session === undefined) continue;
+    if (entry.session === null || entry.session === undefined || entry.session === 0) continue;
     const date = new Date(entry.ts);
     const dayKey = date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
     if (!byDay[dayKey]) byDay[dayKey] = [];
