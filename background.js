@@ -295,17 +295,14 @@ function saveLatest(usage) {
 // 1. When resets_at changes (new session detected), log the previous session's final snapshot
 // 2. Fallback: when within 5 min of reset, log once per session (in case SW misses the transition)
 // The previousSession is updated every poll but ONLY pushed to usageLog on session change.
-// Round ISO timestamp to minute (ignore seconds/ms differences)
-function roundResetToMinute(isoString) {
-  if (!isoString) return null;
-  const d = new Date(isoString);
-  d.setSeconds(0, 0);
-  return d.toISOString();
-}
-
+// Compare two resets_at timestamps - consider them the same session
+// if they're within 30 minutes of each other (API returns slightly
+// different timestamps across polls for the same session)
 function isSameSession(resetA, resetB) {
   if (!resetA || !resetB) return false;
-  return roundResetToMinute(resetA) === roundResetToMinute(resetB);
+  const THIRTY_MINUTES = 30 * 60 * 1000;
+  const diff = Math.abs(new Date(resetA).getTime() - new Date(resetB).getTime());
+  return diff < THIRTY_MINUTES;
 }
 
 async function maybeLogUsage(usage, settings) {
@@ -318,8 +315,7 @@ async function maybeLogUsage(usage, settings) {
     chrome.storage.local.get({
       usageLog: [],
       previousSession: null,
-      lastTrackedResetAt: null,
-      lastLoggedResetAt: null
+      lastTrackedResetAt: null
     }, resolve)
   );
 
@@ -327,7 +323,9 @@ async function maybeLogUsage(usage, settings) {
   const prevResetAt = result.lastTrackedResetAt;
   let shouldSave = false;
 
-  // Strategy 1: Detect session change — log the PREVIOUS session's final values
+  // Detect session change — log the PREVIOUS session's final values.
+  // Only strategy: when resets_at changes by 30+ minutes, a new session started.
+  // The previous session's last snapshot is then committed to the log.
   if (prevResetAt && !isSameSession(prevResetAt, usage.sessionResetsAt) && result.previousSession) {
     log.push({
       ts: result.previousSession.ts,
@@ -336,22 +334,6 @@ async function maybeLogUsage(usage, settings) {
       sonnet: result.previousSession.sonnet,
       sessionResetsAt: prevResetAt,
       weeklyResetsAt: result.previousSession.weeklyResetsAt
-    });
-    shouldSave = true;
-  }
-
-  // Strategy 2: Fallback — within 5 min of reset, log once if not already logged
-  const resetsAt = new Date(usage.sessionResetsAt).getTime();
-  const timeUntilResetMs = resetsAt - now;
-  if (timeUntilResetMs > 0 && timeUntilResetMs <= 5 * 60 * 1000
-      && !isSameSession(result.lastLoggedResetAt, usage.sessionResetsAt)) {
-    log.push({
-      ts: now,
-      session: usage.session,
-      weekly: usage.weekly,
-      sonnet: usage.sonnet,
-      sessionResetsAt: usage.sessionResetsAt,
-      weeklyResetsAt: usage.weeklyResetsAt
     });
     shouldSave = true;
   }
@@ -371,8 +353,7 @@ async function maybeLogUsage(usage, settings) {
   chrome.storage.local.set({
     usageLog: pruned,
     previousSession: currentSnapshot,
-    lastTrackedResetAt: usage.sessionResetsAt,
-    lastLoggedResetAt: shouldSave ? usage.sessionResetsAt : result.lastLoggedResetAt
+    lastTrackedResetAt: usage.sessionResetsAt
   });
 }
 
