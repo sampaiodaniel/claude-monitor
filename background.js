@@ -295,6 +295,19 @@ function saveLatest(usage) {
 // 1. When resets_at changes (new session detected), log the previous session's final snapshot
 // 2. Fallback: when within 5 min of reset, log once per session (in case SW misses the transition)
 // The previousSession is updated every poll but ONLY pushed to usageLog on session change.
+// Round ISO timestamp to minute (ignore seconds/ms differences)
+function roundResetToMinute(isoString) {
+  if (!isoString) return null;
+  const d = new Date(isoString);
+  d.setSeconds(0, 0);
+  return d.toISOString();
+}
+
+function isSameSession(resetA, resetB) {
+  if (!resetA || !resetB) return false;
+  return roundResetToMinute(resetA) === roundResetToMinute(resetB);
+}
+
 async function maybeLogUsage(usage, settings) {
   if (!usage.sessionResetsAt) return;
 
@@ -315,7 +328,7 @@ async function maybeLogUsage(usage, settings) {
   let shouldSave = false;
 
   // Strategy 1: Detect session change — log the PREVIOUS session's final values
-  if (prevResetAt && prevResetAt !== usage.sessionResetsAt && result.previousSession) {
+  if (prevResetAt && !isSameSession(prevResetAt, usage.sessionResetsAt) && result.previousSession) {
     log.push({
       ts: result.previousSession.ts,
       session: result.previousSession.session,
@@ -331,7 +344,7 @@ async function maybeLogUsage(usage, settings) {
   const resetsAt = new Date(usage.sessionResetsAt).getTime();
   const timeUntilResetMs = resetsAt - now;
   if (timeUntilResetMs > 0 && timeUntilResetMs <= 5 * 60 * 1000
-      && result.lastLoggedResetAt !== usage.sessionResetsAt) {
+      && !isSameSession(result.lastLoggedResetAt, usage.sessionResetsAt)) {
     log.push({
       ts: now,
       session: usage.session,
