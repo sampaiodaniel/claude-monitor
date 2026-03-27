@@ -148,7 +148,8 @@ function buildDayPages() {
   if (currentPageEntries.length > 0) packedPages.push(currentPageEntries);
 
   // packedPages is oldest-first. Reverse so page 1 = most recent.
-  pages = packedPages.reverse();
+  // Sort entries within each page newest-first for the table display.
+  pages = packedPages.reverse().map(p => p.sort((a, b) => b.ts - a.ts));
   currentPage = 0;
 }
 
