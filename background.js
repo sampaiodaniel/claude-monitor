@@ -1,4 +1,4 @@
-// background.js - Claude Usage Monitor Service Worker
+// background.js - Claude Usage Monitor Service Worker (Multi-Account)
 
 const DEFAULT_INTERVALS = [
   { from: 0,  color: '#4CAF50' },
@@ -18,21 +18,88 @@ const DEFAULT_SETTINGS = {
 };
 
 const GRAY = '#9E9E9E';
+const CRITICAL_THRESHOLD = 95;
+const CRITICAL_POLL_MINUTES = 1;
+const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
-// -- State is persisted in chrome.storage.local to survive SW restarts --
+// -- Namespaced storage helpers --
+function accountKey(orgUuid, key) {
+  return `account:${orgUuid}:${key}`;
+}
+
+async function getLocal(keys) {
+  return new Promise(resolve => chrome.storage.local.get(keys, resolve));
+}
+
+async function setLocal(data) {
+  return new Promise(resolve => chrome.storage.local.set(data, resolve));
+}
+
+// -- Migration from single-account to multi-account --
+async function migrateToMultiAccount() {
+  const data = await getLocal(null);
+  console.log('[CM] Migration check — accounts exists:', !!data.accounts, 'orgUuid exists:', !!data.orgUuid);
+
+  // Already migrated?
+  if (data.accounts) return;
+
+  const orgUuid = data.orgUuid;
+  if (!orgUuid) {
+    // No existing data, initialize empty
+    await setLocal({ accounts: {}, activeAccountId: null });
+    return;
+  }
+
+  // Build account entry from existing data
+  const accounts = {
+    [orgUuid]: {
+      orgUuid,
+      orgName: '',
+      customLabel: '',
+      firstSeen: data.usageLog?.[0]?.ts || Date.now(),
+      lastSeen: data.latestUsage?.fetchedAt || Date.now()
+    }
+  };
+
+  // Namespace existing data under the account
+  const migrated = {
+    accounts,
+    activeAccountId: orgUuid,
+    [accountKey(orgUuid, 'latestUsage')]: data.latestUsage || null,
+    [accountKey(orgUuid, 'usageLog')]: data.usageLog || [],
+    [accountKey(orgUuid, 'previousSession')]: data.previousSession || null,
+    [accountKey(orgUuid, 'lastTrackedResetAt')]: data.lastTrackedResetAt || null,
+    [accountKey(orgUuid, 'notifiedState')]: data.notifiedState || null,
+  };
+
+  // Also keep global latestUsage for backward compat with popup quick read
+  migrated.latestUsage = data.latestUsage || null;
+
+  await setLocal(migrated);
+
+  // Remove old flat keys
+  await new Promise(resolve =>
+    chrome.storage.local.remove([
+      'orgUuid', 'previousSession', 'lastTrackedResetAt',
+      'notifiedState', 'lastLoggedResetAt', 'lastLoggedResetAt'
+    ], resolve)
+  );
+}
 
 // -- Init --
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   chrome.storage.sync.get(null, (stored) => {
     if (!stored.pollIntervalMinutes) {
       chrome.storage.sync.set(DEFAULT_SETTINGS);
     }
   });
+  await migrateToMultiAccount();
   setupAlarm();
   fetchUsage();
 });
 
-chrome.runtime.onStartup.addListener(() => {
+chrome.runtime.onStartup.addListener(async () => {
+  await migrateToMultiAccount();
   setupAlarm();
   fetchUsage();
 });
@@ -42,9 +109,6 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     fetchUsage();
   }
 });
-
-const CRITICAL_THRESHOLD = 95;
-const CRITICAL_POLL_MINUTES = 1;
 
 async function setupAlarm(overrideMinutes) {
   const settings = await getSettings();
@@ -62,8 +126,6 @@ async function getSettings() {
 
 // -- Fetch helper with explicit cookies (Edge/Chromium compatibility) --
 async function fetchWithCookies(url) {
-  // First try credentials: 'include' (works in Chrome)
-  // If that fails with 401/403, fallback to explicit cookie header (Edge)
   const cookies = await chrome.cookies.getAll({ domain: 'claude.ai' });
   const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
@@ -73,71 +135,224 @@ async function fetchWithCookies(url) {
   });
 }
 
-// -- Auto-discover org UUID --
-async function getOrgUuid() {
-  const cached = await new Promise(resolve =>
-    chrome.storage.local.get('orgUuid', resolve)
-  );
-  if (cached.orgUuid) return cached.orgUuid;
+// -- Detect active account --
+// Fetches /organizations, then probes /usage on each org to find the one that works.
+// Returns { uuid, orgName, authFailed }
+async function detectActiveAccount() {
+  const state = await getLocal(['accounts', 'activeAccountId', 'usableOrgUuid']);
+  const cachedId = state.activeAccountId;
+  const cachedUsable = state.usableOrgUuid; // org that last worked for /usage
 
   try {
     const resp = await fetchWithCookies('https://claude.ai/api/organizations');
-    if (!resp.ok) return null;
-    const orgs = await resp.json();
-    if (orgs.length > 0) {
-      const uuid = orgs[0].uuid;
-      chrome.storage.local.set({ orgUuid: uuid });
-      return uuid;
+    console.log('[CM] /organizations status:', resp.status);
+
+    if (!resp.ok) {
+      if (resp.status === 401 || resp.status === 403) {
+        console.log('[CM] Auth failed, need login');
+        return { uuid: null, authFailed: true };
+      }
+      console.log('[CM] API error, using cache:', cachedId);
+      return { uuid: cachedUsable || cachedId || null, authFailed: false };
     }
+
+    const orgs = await resp.json();
+    console.log('[CM] Orgs:', orgs.map(o => `${o.name}(${o.uuid.slice(0,8)})`).join(', '));
+
+    if (!orgs || orgs.length === 0) {
+      return { uuid: cachedUsable || cachedId || null, authFailed: false };
+    }
+
+    // Prioritize orgs: Teams/raven with "chat" > personal with "chat" > API-only
+    // This ensures the active chat org is selected, not an API-only org
+    const orderedOrgs = [...orgs].sort((a, b) => {
+      const aChat = (a.capabilities || []).includes('chat');
+      const bChat = (b.capabilities || []).includes('chat');
+      const aRaven = a.raven_type === 'team';
+      const bRaven = b.raven_type === 'team';
+
+      // Teams (raven) with chat first
+      if (aRaven && aChat && !(bRaven && bChat)) return -1;
+      if (bRaven && bChat && !(aRaven && aChat)) return 1;
+      // Then any chat org
+      if (aChat && !bChat) return -1;
+      if (bChat && !aChat) return 1;
+      return 0;
+    });
+
+    // If we have a cached usable org, try it first (but after priority sort)
+    if (cachedUsable) {
+      const idx = orderedOrgs.findIndex(o => o.uuid === cachedUsable);
+      // Only promote cached if it's a chat org (don't promote API-only)
+      if (idx > 0) {
+        const cached = orderedOrgs[idx];
+        if ((cached.capabilities || []).includes('chat')) {
+          const [hit] = orderedOrgs.splice(idx, 1);
+          orderedOrgs.unshift(hit);
+        }
+      }
+    }
+
+    console.log('[CM] Org priority:', orderedOrgs.map(o =>
+      `${o.name}(${o.uuid.slice(0,8)}) caps=${(o.capabilities||[]).join(',')} raven=${o.raven_type||'none'}`
+    ).join(' → '));
+
+    let usableOrg = null;
+    for (const org of orderedOrgs) {
+      const usageResp = await fetchWithCookies(
+        `https://claude.ai/api/organizations/${org.uuid}/usage`
+      );
+      console.log('[CM] Probe /usage for', org.name, `(${org.uuid.slice(0,8)})`, '→', usageResp.status);
+      if (usageResp.ok) {
+        usableOrg = org;
+        break;
+      }
+    }
+
+    if (!usableOrg) {
+      console.log('[CM] No org returned 200 for /usage');
+      // All orgs returned 403 — use cached if available
+      return { uuid: cachedUsable || cachedId || null, authFailed: false };
+    }
+
+    const uuid = usableOrg.uuid;
+    const orgName = usableOrg.name || '';
+    console.log('[CM] Usable org:', orgName, uuid.slice(0, 8));
+
+    const accounts = state.accounts || {};
+
+    // Upsert account in registry
+    if (!accounts[uuid]) {
+      accounts[uuid] = {
+        orgUuid: uuid,
+        orgName,
+        customLabel: '',
+        firstSeen: Date.now(),
+        lastSeen: Date.now()
+      };
+    } else {
+      accounts[uuid].orgName = orgName;
+      accounts[uuid].lastSeen = Date.now();
+    }
+
+    // Detect account switch
+    if (cachedId && cachedId !== uuid) {
+      console.log('[CM] Account switch detected:', cachedId, '->', uuid);
+      await handleAccountSwitch(cachedId, uuid);
+    }
+
+    await setLocal({ accounts, activeAccountId: uuid, usableOrgUuid: uuid });
+    return { uuid, authFailed: false };
   } catch (e) {
-    // ignore
+    console.error('[CM] detectActiveAccount error:', e.message);
+    return { uuid: cachedUsable || cachedId || null, authFailed: false };
   }
-  return null;
+}
+
+// -- Handle account switch: commit old session, update active --
+async function handleAccountSwitch(oldId, newId) {
+  const prevKey = accountKey(oldId, 'previousSession');
+  const logKey = accountKey(oldId, 'usageLog');
+  const resetKey = accountKey(oldId, 'lastTrackedResetAt');
+
+  const oldData = await getLocal([prevKey, logKey, resetKey]);
+  const prevSession = oldData[prevKey];
+  const log = oldData[logKey] || [];
+  const lastReset = oldData[resetKey];
+
+  if (prevSession && lastReset) {
+    log.push({
+      ts: prevSession.ts,
+      session: prevSession.session,
+      weekly: prevSession.weekly,
+      sonnet: prevSession.sonnet,
+      sessionResetsAt: lastReset,
+      weeklyResetsAt: prevSession.weeklyResetsAt
+    });
+
+    const now = Date.now();
+    const pruned = log.filter(entry => (now - entry.ts) < MAX_AGE_MS);
+    await setLocal({
+      [logKey]: pruned,
+      [prevKey]: null,
+      [resetKey]: null
+    });
+  }
+}
+
+// -- Get account display name --
+async function getAccountDisplayName(orgUuid) {
+  const data = await getLocal('accounts');
+  const accounts = data.accounts || {};
+  const acct = accounts[orgUuid];
+  if (!acct) return '';
+  return acct.customLabel || acct.orgName || '';
 }
 
 // -- Fetch Usage --
 async function fetchUsage() {
-  const orgUuid = await getOrgUuid();
-  if (!orgUuid) {
+  console.log('[CM] fetchUsage() starting...');
+  const detected = await detectActiveAccount();
+  console.log('[CM] detectActiveAccount result:', JSON.stringify(detected));
+
+  // Auth truly failed (401/403 from /organizations) — show login
+  if (detected.authFailed) {
+    console.log('[CM] Auth failed, showing login');
     setBadgeError();
-    saveLatest({ error: 'no_org' });
+    saveLatest({ error: 'no_org' }, null);
     return;
   }
 
+  // No account at all (never logged in)
+  if (!detected.uuid) {
+    console.log('[CM] No uuid at all, showing login');
+    setBadgeError();
+    saveLatest({ error: 'no_org' }, null);
+    return;
+  }
+
+  const orgUuid = detected.uuid;
   const settings = await getSettings();
   const url = `https://claude.ai/api/organizations/${orgUuid}/usage`;
+  console.log('[CM] Fetching usage for:', orgUuid);
 
   try {
     const resp = await fetchWithCookies(url);
+    console.log('[CM] Usage API status:', resp.status);
 
     if (!resp.ok) {
+      // detectActiveAccount already probed /usage, so this shouldn't happen often.
+      // If it does (race condition, session expired mid-request), just show error badge
+      // but DON'T clear activeAccountId — the account is still valid.
+      console.log('[CM] Usage fetch failed:', resp.status);
       if (resp.status === 401 || resp.status === 403) {
-        chrome.storage.local.remove('orgUuid');
+        // Clear usableOrgUuid so next poll re-probes all orgs
+        await setLocal({ usableOrgUuid: null });
       }
       setBadgeError();
-      saveLatest({ error: resp.status });
       return;
     }
 
     const data = await resp.json();
     const usage = parseUsage(data);
+    console.log('[CM] Usage parsed:', JSON.stringify(usage));
 
-    saveLatest(usage);
+    saveLatest(usage, orgUuid);
     updateBadge(usage, settings);
-    await checkAlerts(usage, settings);
-    maybeLogUsage(usage, settings);
+    await checkAlerts(usage, settings, orgUuid);
+    await maybeLogUsage(usage, settings, orgUuid);
 
     // Turbo mode: poll every 1 min when session >= 95%
     const isCritical = usage.session !== null && usage.session >= CRITICAL_THRESHOLD;
     const currentInterval = isCritical ? CRITICAL_POLL_MINUTES : settings.pollIntervalMinutes;
-    const stored = await new Promise(r => chrome.storage.local.get('currentPollMinutes', r));
+    const stored = await getLocal('currentPollMinutes');
     if (stored.currentPollMinutes !== currentInterval) {
       await setupAlarm(currentInterval);
-      chrome.storage.local.set({ currentPollMinutes: currentInterval });
+      await setLocal({ currentPollMinutes: currentInterval });
     }
   } catch (err) {
+    // Network error — don't overwrite valid cached data
     setBadgeError();
-    saveLatest({ error: err.message });
   }
 }
 
@@ -181,35 +396,35 @@ function setBadgeError() {
   chrome.action.setBadgeBackgroundColor({ color: GRAY });
 }
 
-// -- Alerts (Notifications) --
-// State is persisted in chrome.storage.local so it survives SW restarts
-async function loadNotifiedState() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get('notifiedState', (result) => {
-      resolve(result.notifiedState || {
-        sessionNotified: [],
-        weeklyNotified: [],
-        lastSessionResetAt: null,
-        lastWeeklyResetAt: null
-      });
-    });
-  });
+// -- Alerts (Notifications) -- namespaced per account --
+async function loadNotifiedState(orgUuid) {
+  const key = accountKey(orgUuid, 'notifiedState');
+  const result = await getLocal(key);
+  return result[key] || {
+    sessionNotified: [],
+    weeklyNotified: [],
+    lastSessionResetAt: null,
+    lastWeeklyResetAt: null
+  };
 }
 
-async function saveNotifiedState(state) {
-  return new Promise((resolve) => {
-    chrome.storage.local.set({ notifiedState: state }, resolve);
-  });
+async function saveNotifiedState(orgUuid, state) {
+  const key = accountKey(orgUuid, 'notifiedState');
+  await setLocal({ [key]: state });
 }
 
-async function checkAlerts(usage, settings) {
+async function checkAlerts(usage, settings, orgUuid) {
   if (!settings.notificationsEnabled) return;
 
   const alerts = settings.alerts || DEFAULT_ALERTS;
-  const state = await loadNotifiedState();
+  const state = await loadNotifiedState(orgUuid);
   let changed = false;
 
-  // Reset cycle detection - clear flags when resets_at changes
+  // Account name prefix for notifications
+  const accountName = await getAccountDisplayName(orgUuid);
+  const prefix = accountName ? `[${accountName}] ` : '';
+
+  // Reset cycle detection
   if (usage.sessionResetsAt && usage.sessionResetsAt !== state.lastSessionResetAt) {
     state.sessionNotified = [];
     state.lastSessionResetAt = usage.sessionResetsAt;
@@ -228,8 +443,8 @@ async function checkAlerts(usage, settings) {
       changed = true;
       const resetIn = formatTimeUntil(usage.sessionResetsAt);
       fireNotification(
-        `session-${threshold}`,
-        `Claude Monitor: Sessão atingiu ${threshold}%`,
+        `session-${threshold}-${orgUuid}`,
+        `${prefix}Sessão atingiu ${threshold}%`,
         `Uso atual: ${usage.session}%. Reseta em ${resetIn}.`
       );
     }
@@ -242,15 +457,15 @@ async function checkAlerts(usage, settings) {
       changed = true;
       const resetIn = formatTimeUntil(usage.weeklyResetsAt);
       fireNotification(
-        `weekly-${threshold}`,
-        `Claude Monitor: Semanal atingiu ${threshold}%`,
+        `weekly-${threshold}-${orgUuid}`,
+        `${prefix}Semanal atingiu ${threshold}%`,
         `Uso atual: ${usage.weekly}%. Reseta em ${resetIn}.`
       );
     }
   }
 
   if (changed) {
-    await saveNotifiedState(state);
+    await saveNotifiedState(orgUuid, state);
   }
 }
 
@@ -285,19 +500,17 @@ function formatTimeUntil(isoString) {
   return `${minutes}min`;
 }
 
-// -- Storage: Latest (for popup) --
-function saveLatest(usage) {
-  chrome.storage.local.set({ latestUsage: usage });
+// -- Storage: Latest (for popup) -- namespaced + global copy --
+function saveLatest(usage, orgUuid) {
+  const updates = { latestUsage: usage };
+  if (orgUuid) {
+    updates[accountKey(orgUuid, 'latestUsage')] = usage;
+    updates.activeAccountId = orgUuid;
+  }
+  chrome.storage.local.set(updates);
 }
 
-// -- Storage: Usage Log --
-// Two capture strategies combined:
-// 1. When resets_at changes (new session detected), log the previous session's final snapshot
-// 2. Fallback: when within 5 min of reset, log once per session (in case SW misses the transition)
-// The previousSession is updated every poll but ONLY pushed to usageLog on session change.
-// Compare two resets_at timestamps - consider them the same session
-// if they're within 30 minutes of each other (API returns slightly
-// different timestamps across polls for the same session)
+// -- Storage: Usage Log -- namespaced per account --
 function isSameSession(resetA, resetB) {
   if (!resetA || !resetB) return false;
   const THIRTY_MINUTES = 30 * 60 * 1000;
@@ -305,40 +518,38 @@ function isSameSession(resetA, resetB) {
   return diff < THIRTY_MINUTES;
 }
 
-async function maybeLogUsage(usage, settings) {
+async function maybeLogUsage(usage, settings, orgUuid) {
   if (!usage.sessionResetsAt) return;
 
   const now = Date.now();
-  const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
+  const logKey = accountKey(orgUuid, 'usageLog');
+  const prevKey = accountKey(orgUuid, 'previousSession');
+  const resetKey = accountKey(orgUuid, 'lastTrackedResetAt');
 
-  const result = await new Promise(resolve =>
-    chrome.storage.local.get({
-      usageLog: [],
-      previousSession: null,
-      lastTrackedResetAt: null
-    }, resolve)
-  );
+  const result = await getLocal({
+    [logKey]: [],
+    [prevKey]: null,
+    [resetKey]: null
+  });
 
-  const log = result.usageLog;
-  const prevResetAt = result.lastTrackedResetAt;
+  const log = result[logKey] || [];
+  const prevResetAt = result[resetKey];
   let shouldSave = false;
 
   // Detect session change — log the PREVIOUS session's final values.
-  // Only strategy: when resets_at changes by 30+ minutes, a new session started.
-  // The previous session's last snapshot is then committed to the log.
-  if (prevResetAt && !isSameSession(prevResetAt, usage.sessionResetsAt) && result.previousSession) {
+  if (prevResetAt && !isSameSession(prevResetAt, usage.sessionResetsAt) && result[prevKey]) {
     log.push({
-      ts: result.previousSession.ts,
-      session: result.previousSession.session,
-      weekly: result.previousSession.weekly,
-      sonnet: result.previousSession.sonnet,
+      ts: result[prevKey].ts,
+      session: result[prevKey].session,
+      weekly: result[prevKey].weekly,
+      sonnet: result[prevKey].sonnet,
       sessionResetsAt: prevResetAt,
-      weeklyResetsAt: result.previousSession.weeklyResetsAt
+      weeklyResetsAt: result[prevKey].weeklyResetsAt
     });
     shouldSave = true;
   }
 
-  // Always update the snapshot (no push to log — just overwrites in storage)
+  // Always update the snapshot
   const currentSnapshot = {
     ts: now,
     session: usage.session,
@@ -348,12 +559,12 @@ async function maybeLogUsage(usage, settings) {
   };
 
   // Prune old entries
-  const pruned = shouldSave ? log.filter(entry => (now - entry.ts) < MAX_AGE_MS) : result.usageLog;
+  const pruned = shouldSave ? log.filter(entry => (now - entry.ts) < MAX_AGE_MS) : (result[logKey] || []);
 
-  chrome.storage.local.set({
-    usageLog: pruned,
-    previousSession: currentSnapshot,
-    lastTrackedResetAt: usage.sessionResetsAt
+  await setLocal({
+    [logKey]: pruned,
+    [prevKey]: currentSnapshot,
+    [resetKey]: usage.sessionResetsAt
   });
 }
 
@@ -370,17 +581,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     fetchUsage().then(() => sendResponse());
     return true;
   }
+  if (msg.action === 'getAccounts') {
+    getLocal(['accounts', 'activeAccountId']).then((data) => {
+      sendResponse({ accounts: data.accounts || {}, activeAccountId: data.activeAccountId });
+    });
+    return true;
+  }
+  if (msg.action === 'setAccountLabel') {
+    getLocal('accounts').then((data) => {
+      const accounts = data.accounts || {};
+      if (accounts[msg.orgUuid]) {
+        accounts[msg.orgUuid].customLabel = msg.label;
+        setLocal({ accounts }).then(() => sendResponse('ok'));
+      } else {
+        sendResponse('not_found');
+      }
+    });
+    return true;
+  }
   if (msg.action === 'injectTestData') {
-    chrome.storage.local.set({ usageLog: msg.data }, () => sendResponse('ok'));
+    // For test data injection, need orgUuid context
+    const orgUuid = msg.orgUuid;
+    if (orgUuid) {
+      setLocal({ [accountKey(orgUuid, 'usageLog')]: msg.data }).then(() => sendResponse('ok'));
+    } else {
+      // Fallback: inject into active account
+      getLocal('activeAccountId').then((data) => {
+        const id = data.activeAccountId;
+        if (id) {
+          setLocal({ [accountKey(id, 'usageLog')]: msg.data }).then(() => sendResponse('ok'));
+        } else {
+          sendResponse('no_active');
+        }
+      });
+    }
     return true;
   }
   if (msg.action === 'clearUsageLog') {
-    chrome.storage.local.set({
-      usageLog: [],
-      previousSession: null,
-      lastTrackedResetAt: null,
-      lastLoggedResetAt: null
-    }, () => sendResponse('ok'));
+    const orgUuid = msg.orgUuid;
+    if (!orgUuid) {
+      sendResponse('no_org');
+      return true;
+    }
+    setLocal({
+      [accountKey(orgUuid, 'usageLog')]: [],
+      [accountKey(orgUuid, 'previousSession')]: null,
+      [accountKey(orgUuid, 'lastTrackedResetAt')]: null,
+    }).then(() => sendResponse('ok'));
     return true;
   }
 });
