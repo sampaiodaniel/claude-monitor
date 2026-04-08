@@ -240,6 +240,13 @@ async function detectActiveAccount() {
       accounts[userUuid].email = email;
       accounts[userUuid].displayName = displayName;
       accounts[userUuid].lastSeen = Date.now();
+      // Clear stale customLabel if it doesn't match the detected email
+      const label = (accounts[userUuid].customLabel || '').toLowerCase();
+      const prefix = email.split('@')[0].toLowerCase();
+      if (label && label !== prefix && !prefix.includes(label)) {
+        console.log('[CM] Clearing stale customLabel:', accounts[userUuid].customLabel);
+        accounts[userUuid].customLabel = '';
+      }
     }
 
     // Merge legacy accounts (keyed by org UUID) into user-keyed account

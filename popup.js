@@ -133,7 +133,7 @@ function renderAccountBar(accounts, activeId) {
   }
 
   bar.classList.remove('hidden');
-  nameEl.textContent = active.customLabel || active.email || active.displayName || active.orgName || 'Conta desconhecida';
+  nameEl.textContent = active.email || active.customLabel || active.displayName || active.orgName || 'Conta desconhecida';
 }
 
 function showLoginScreen() {
