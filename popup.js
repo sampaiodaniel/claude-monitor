@@ -173,13 +173,16 @@ function switchAccount(newAccountId) {
   const dropdown = document.getElementById('account-dropdown');
   const switchEl = document.getElementById('account-switch');
   dropdown.classList.remove('visible');
+  dropdown.classList.add('hidden');
   switchEl.classList.remove('open');
 
-  // Update activeAccountId in storage
+  // Update activeAccountId and reload UI immediately
   chrome.storage.local.set({ activeAccountId: newAccountId }, () => {
-    // Trigger a fetch for the new account
+    // Reload UI right away (shows cached data or loading state)
+    loadUsage();
+    // Then trigger background fetch for fresh data
     chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
-      setTimeout(() => loadUsage(), 1500);
+      loadUsage();
     });
   });
 }
