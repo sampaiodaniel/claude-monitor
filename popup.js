@@ -182,7 +182,7 @@ function switchAccount(newAccountId) {
     const cachedUsage = result[acctKey];
 
     // Set activeAccountId and also update global latestUsage with cached data
-    const updates = { activeAccountId: newAccountId };
+    const updates = { activeAccountId: newAccountId, manuallySelected: true };
     if (cachedUsage && !cachedUsage.error) {
       updates.latestUsage = cachedUsage;
     }

@@ -42,11 +42,17 @@ chrome.webRequest.onBeforeRequest.addListener(
     lastDetectedOrgUuid = detectedUuid;
     console.log('[CM] webRequest detected active org:', detectedUuid);
 
-    // Update active account if it differs
-    chrome.storage.local.get(['activeAccountId', 'accounts'], (state) => {
+    // Only auto-switch if user hasn't manually selected a different account
+    chrome.storage.local.get(['activeAccountId', 'accounts', 'manuallySelected'], (state) => {
       if (state.activeAccountId === detectedUuid) return;
 
-      console.log('[CM] Switching active account:', state.activeAccountId, '→', detectedUuid);
+      // If user manually selected an account, don't override
+      if (state.manuallySelected) {
+        console.log('[CM] webRequest detected', detectedUuid, 'but user manually selected', state.activeAccountId, '— skipping auto-switch');
+        return;
+      }
+
+      console.log('[CM] Auto-switching active account:', state.activeAccountId, '→', detectedUuid);
 
       // Ensure accounts entry exists
       const accounts = state.accounts || {};
@@ -64,7 +70,6 @@ chrome.webRequest.onBeforeRequest.addListener(
         activeAccountId: detectedUuid,
         accounts
       }, () => {
-        // Immediately fetch usage for the new active account
         fetchUsage();
       });
     });
@@ -555,7 +560,8 @@ function saveLatest(usage, orgUuid) {
   const updates = { latestUsage: usage };
   if (orgUuid) {
     updates[accountKey(orgUuid, 'latestUsage')] = usage;
-    updates.activeAccountId = orgUuid;
+    // Don't overwrite activeAccountId here — it's managed by
+    // the popup dropdown (manual) and webRequest listener (auto)
   }
   chrome.storage.local.set(updates);
 }
