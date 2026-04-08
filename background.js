@@ -238,19 +238,6 @@ async function detectActiveAccount() {
       return 0;
     });
 
-    // If we have a cached usable org, try it first (but after priority sort)
-    if (cachedUsable) {
-      const idx = orderedOrgs.findIndex(o => o.uuid === cachedUsable);
-      // Only promote cached if it's a chat org (don't promote API-only)
-      if (idx > 0) {
-        const cached = orderedOrgs[idx];
-        if ((cached.capabilities || []).includes('chat')) {
-          const [hit] = orderedOrgs.splice(idx, 1);
-          orderedOrgs.unshift(hit);
-        }
-      }
-    }
-
     console.log('[CM] Org priority:', orderedOrgs.map(o =>
       `${o.name}(${o.uuid.slice(0,8)}) caps=${(o.capabilities||[]).join(',')} raven=${o.raven_type||'none'}`
     ).join(' → '));
