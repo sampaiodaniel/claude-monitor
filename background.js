@@ -269,14 +269,16 @@ async function mergeLegacyAccounts(accounts, userUuid, email, displayName) {
     if (oldId === userUuid) continue; // skip self
     if (acct.email) continue; // already a user-keyed account, skip
 
-    // Match by label or name similarity
+    // Match by label or name similarity to email prefix
+    // e.g. label "Robot2" matches email "robot2@fhinck.com"
+    // e.g. label "Daniel" matches email "daniel.sampaio@fhinck.com" (prefix "daniel")
     const label = (acct.customLabel || '').toLowerCase();
-    const name = (acct.displayName || acct.orgName || '').toLowerCase();
+    const emailParts = emailPrefix.split('.'); // "daniel.sampaio" → ["daniel", "sampaio"]
     const isMatch = (
       label === emailPrefix ||
       label === displayName.toLowerCase() ||
-      name === emailPrefix ||
-      oldId === acct.orgUuid // old account was keyed by org UUID
+      emailParts.includes(label) ||
+      label === emailParts[0]
     );
 
     if (!isMatch) continue;
