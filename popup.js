@@ -176,13 +176,24 @@ function switchAccount(newAccountId) {
   dropdown.classList.add('hidden');
   switchEl.classList.remove('open');
 
-  // Update activeAccountId and reload UI immediately
-  chrome.storage.local.set({ activeAccountId: newAccountId }, () => {
-    // Reload UI right away (shows cached data or loading state)
-    loadUsage();
-    // Then trigger background fetch for fresh data
-    chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
+  // Read cached data for the new account to update badge immediately
+  const acctKey = `account:${newAccountId}:latestUsage`;
+  chrome.storage.local.get(acctKey, (result) => {
+    const cachedUsage = result[acctKey];
+
+    // Set activeAccountId and also update global latestUsage with cached data
+    const updates = { activeAccountId: newAccountId };
+    if (cachedUsage && !cachedUsage.error) {
+      updates.latestUsage = cachedUsage;
+    }
+
+    chrome.storage.local.set(updates, () => {
+      // Reload UI immediately with cached data
       loadUsage();
+      // Then trigger background fetch for fresh data
+      chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
+        loadUsage();
+      });
     });
   });
 }
