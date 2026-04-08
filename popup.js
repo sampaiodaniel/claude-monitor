@@ -126,10 +126,13 @@ function renderAccountBar(accounts, activeId) {
   const bar = document.getElementById('account-bar');
   const nameEl = document.getElementById('account-name');
   const countEl = document.getElementById('account-count');
+  const switchEl = document.getElementById('account-switch');
+  const dropdown = document.getElementById('account-dropdown');
 
   const accountList = Object.values(accounts);
   if (accountList.length === 0) {
     bar.classList.add('hidden');
+    dropdown.classList.add('hidden');
     return;
   }
 
@@ -139,9 +142,44 @@ function renderAccountBar(accounts, activeId) {
 
   if (accountList.length > 1) {
     countEl.textContent = `(${accountList.length} contas)`;
+    switchEl.classList.remove('hidden');
+
+    // Build dropdown options (exclude active account)
+    dropdown.innerHTML = '';
+    for (const acct of accountList) {
+      if (acct.orgUuid === activeId) continue;
+      const opt = document.createElement('div');
+      opt.className = 'account-option';
+      opt.innerHTML = `<span class="opt-dot"></span>${acct.customLabel || acct.orgName || acct.orgUuid.slice(0, 8)}`;
+      opt.addEventListener('click', () => switchAccount(acct.orgUuid));
+      dropdown.appendChild(opt);
+    }
+
+    // Toggle dropdown on bar click
+    bar.onclick = () => {
+      const isOpen = dropdown.classList.toggle('visible');
+      switchEl.classList.toggle('open', isOpen);
+    };
   } else {
     countEl.textContent = '';
+    switchEl.classList.add('hidden');
+    bar.onclick = null;
   }
+}
+
+function switchAccount(newAccountId) {
+  const dropdown = document.getElementById('account-dropdown');
+  const switchEl = document.getElementById('account-switch');
+  dropdown.classList.remove('visible');
+  switchEl.classList.remove('open');
+
+  // Update activeAccountId in storage
+  chrome.storage.local.set({ activeAccountId: newAccountId }, () => {
+    // Trigger a fetch for the new account
+    chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
+      setTimeout(() => loadUsage(), 1500);
+    });
+  });
 }
 
 function showLoginScreen() {

@@ -192,15 +192,20 @@ async function detectActiveAccount() {
   const state = await getLocal(['accounts', 'activeAccountId', 'usableOrgUuid']);
   const cachedId = state.activeAccountId;
 
-  // If webRequest already detected the active org, trust it
+  // If webRequest detected a different org, switch to it
   if (lastDetectedOrgUuid && lastDetectedOrgUuid !== cachedId) {
     console.log('[CM] Using webRequest-detected org:', lastDetectedOrgUuid);
     return { uuid: lastDetectedOrgUuid, authFailed: false };
   }
-  if (cachedId && lastDetectedOrgUuid === cachedId) {
+
+  // If we have a manually selected or webRequest-persisted activeAccountId, trust it.
+  // Only fall through to probe on first-ever use (no cachedId at all).
+  if (cachedId) {
+    console.log('[CM] Using cached activeAccountId:', cachedId);
     return { uuid: cachedId, authFailed: false };
   }
 
+  // First-time detection: probe orgs
   try {
     const resp = await fetchWithCookies('https://claude.ai/api/organizations');
     console.log('[CM] /organizations status:', resp.status);

@@ -59,6 +59,62 @@ body {
   font-size: 10px;
 }
 
+.account-bar {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.account-bar:hover {
+  background: #222240;
+}
+
+.account-switch {
+  margin-left: auto;
+  color: #555;
+  font-size: 10px;
+  transition: transform 0.2s;
+}
+
+.account-switch.open {
+  transform: rotate(180deg);
+}
+
+.account-dropdown {
+  background: #222240;
+  border-bottom: 1px solid #2a2a3e;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease;
+}
+
+.account-dropdown.visible {
+  max-height: 200px;
+}
+
+.account-dropdown .account-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px 6px 28px;
+  font-size: 11px;
+  color: #888;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.account-dropdown .account-option:hover {
+  background: #2a2a4e;
+  color: #e0e0e0;
+}
+
+.account-dropdown .account-option .opt-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #555;
+  flex-shrink: 0;
+}
+
 .icon-btn {
   background: none;
   border: none;
