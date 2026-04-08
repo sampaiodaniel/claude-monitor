@@ -263,7 +263,7 @@ function loadAccountsList() {
 
       const nameDiv = document.createElement('div');
       nameDiv.className = 'account-org-name';
-      nameDiv.textContent = acct.orgName || 'Sem nome';
+      nameDiv.textContent = acct.email || acct.orgName || 'Sem nome';
 
       const metaDiv = document.createElement('div');
       metaDiv.className = 'account-meta';
