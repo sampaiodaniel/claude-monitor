@@ -157,8 +157,10 @@ function renderAccountBar(accounts, activeId) {
 
     // Toggle dropdown on bar click
     bar.onclick = () => {
+      dropdown.classList.remove('hidden');
       const isOpen = dropdown.classList.toggle('visible');
       switchEl.classList.toggle('open', isOpen);
+      if (!isOpen) dropdown.classList.add('hidden');
     };
   } else {
     countEl.textContent = '';
