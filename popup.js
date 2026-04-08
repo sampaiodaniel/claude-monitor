@@ -125,77 +125,15 @@ function renderUsageData(usage) {
 function renderAccountBar(accounts, activeId) {
   const bar = document.getElementById('account-bar');
   const nameEl = document.getElementById('account-name');
-  const countEl = document.getElementById('account-count');
-  const switchEl = document.getElementById('account-switch');
-  const dropdown = document.getElementById('account-dropdown');
 
-  const accountList = Object.values(accounts);
-  if (accountList.length === 0) {
+  const active = accounts[activeId];
+  if (!active) {
     bar.classList.add('hidden');
-    dropdown.classList.add('hidden');
     return;
   }
 
   bar.classList.remove('hidden');
-  const active = accounts[activeId];
-  nameEl.textContent = active?.customLabel || active?.email || active?.displayName || active?.orgName || 'Conta desconhecida';
-
-  if (accountList.length > 1) {
-    countEl.textContent = `(${accountList.length} contas)`;
-    switchEl.classList.remove('hidden');
-
-    // Build dropdown options (exclude active account)
-    dropdown.innerHTML = '';
-    for (const acct of accountList) {
-      if (acct.orgUuid === activeId) continue;
-      const opt = document.createElement('div');
-      opt.className = 'account-option';
-      opt.innerHTML = `<span class="opt-dot"></span>${acct.customLabel || acct.email || acct.displayName || acct.orgName || acct.orgUuid?.slice(0, 8) || '?'}`;
-      opt.addEventListener('click', () => switchAccount(acct.orgUuid));
-      dropdown.appendChild(opt);
-    }
-
-    // Toggle dropdown on bar click
-    bar.onclick = () => {
-      dropdown.classList.remove('hidden');
-      const isOpen = dropdown.classList.toggle('visible');
-      switchEl.classList.toggle('open', isOpen);
-      if (!isOpen) dropdown.classList.add('hidden');
-    };
-  } else {
-    countEl.textContent = '';
-    switchEl.classList.add('hidden');
-    bar.onclick = null;
-  }
-}
-
-function switchAccount(newAccountId) {
-  const dropdown = document.getElementById('account-dropdown');
-  const switchEl = document.getElementById('account-switch');
-  dropdown.classList.remove('visible');
-  dropdown.classList.add('hidden');
-  switchEl.classList.remove('open');
-
-  // Read cached data for the new account to update badge immediately
-  const acctKey = `account:${newAccountId}:latestUsage`;
-  chrome.storage.local.get(acctKey, (result) => {
-    const cachedUsage = result[acctKey];
-
-    // Set activeAccountId and also update global latestUsage with cached data
-    const updates = { activeAccountId: newAccountId };
-    if (cachedUsage && !cachedUsage.error) {
-      updates.latestUsage = cachedUsage;
-    }
-
-    chrome.storage.local.set(updates, () => {
-      // Reload UI immediately with cached data
-      loadUsage();
-      // Then trigger background fetch for fresh data
-      chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
-        loadUsage();
-      });
-    });
-  });
+  nameEl.textContent = active.customLabel || active.email || active.displayName || active.orgName || 'Conta desconhecida';
 }
 
 function showLoginScreen() {
