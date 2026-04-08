@@ -42,15 +42,8 @@ chrome.webRequest.onBeforeRequest.addListener(
     lastDetectedOrgUuid = detectedUuid;
     console.log('[CM] webRequest detected active org:', detectedUuid);
 
-    // Only auto-switch if user hasn't manually selected a different account
-    chrome.storage.local.get(['activeAccountId', 'accounts', 'manuallySelected'], (state) => {
+    chrome.storage.local.get(['activeAccountId', 'accounts'], (state) => {
       if (state.activeAccountId === detectedUuid) return;
-
-      // If user manually selected an account, don't override
-      if (state.manuallySelected) {
-        console.log('[CM] webRequest detected', detectedUuid, 'but user manually selected', state.activeAccountId, '— skipping auto-switch');
-        return;
-      }
 
       console.log('[CM] Auto-switching active account:', state.activeAccountId, '→', detectedUuid);
 
@@ -191,26 +184,14 @@ async function fetchWithCookies(url) {
 }
 
 // -- Detect active account --
-// Priority: webRequest-detected org > cached activeAccountId > org probe
+// Always queries /organizations to detect the REAL logged-in account.
+// Different users (daniel vs robot2) have different sessions/cookies,
+// so the API only returns orgs for the currently logged-in user.
 // Returns { uuid, orgName, authFailed }
 async function detectActiveAccount() {
-  const state = await getLocal(['accounts', 'activeAccountId', 'usableOrgUuid']);
+  const state = await getLocal(['accounts', 'activeAccountId']);
   const cachedId = state.activeAccountId;
 
-  // If webRequest detected a different org, switch to it
-  if (lastDetectedOrgUuid && lastDetectedOrgUuid !== cachedId) {
-    console.log('[CM] Using webRequest-detected org:', lastDetectedOrgUuid);
-    return { uuid: lastDetectedOrgUuid, authFailed: false };
-  }
-
-  // If we have a manually selected or webRequest-persisted activeAccountId, trust it.
-  // Only fall through to probe on first-ever use (no cachedId at all).
-  if (cachedId) {
-    console.log('[CM] Using cached activeAccountId:', cachedId);
-    return { uuid: cachedId, authFailed: false };
-  }
-
-  // First-time detection: probe orgs
   try {
     const resp = await fetchWithCookies('https://claude.ai/api/organizations');
     console.log('[CM] /organizations status:', resp.status);
@@ -296,7 +277,7 @@ async function detectActiveAccount() {
       await handleAccountSwitch(cachedId, uuid);
     }
 
-    await setLocal({ accounts, activeAccountId: uuid, usableOrgUuid: uuid });
+    await setLocal({ accounts, activeAccountId: uuid });
     return { uuid, authFailed: false };
   } catch (e) {
     console.error('[CM] detectActiveAccount error:', e.message);
@@ -381,8 +362,7 @@ async function fetchUsage() {
       // but DON'T clear activeAccountId — the account is still valid.
       console.log('[CM] Usage fetch failed:', resp.status);
       if (resp.status === 401 || resp.status === 403) {
-        // Clear usableOrgUuid so next poll re-probes all orgs
-        await setLocal({ usableOrgUuid: null });
+        // Auth failed for this org — next poll will re-detect
       }
       setBadgeError();
       return;
