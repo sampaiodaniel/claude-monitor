@@ -37,6 +37,7 @@ let historyTabId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
+  loadAccountsList();
   renderColorPicker();
 
   document.getElementById('save-btn').addEventListener('click', saveSettings);
@@ -231,6 +232,68 @@ function renderAlerts() {
       alerts = alerts.filter(a => a !== val);
       renderAlerts();
     });
+  });
+}
+
+// -- Accounts --
+function loadAccountsList() {
+  chrome.storage.local.get(['accounts', 'activeAccountId'], (data) => {
+    const accounts = data.accounts || {};
+    const activeId = data.activeAccountId;
+    const container = document.getElementById('accounts-list');
+    const accountList = Object.values(accounts);
+
+    if (accountList.length === 0) {
+      container.innerHTML = '<div class="accounts-empty">Nenhuma conta detectada ainda. Faça login em claude.ai.</div>';
+      return;
+    }
+
+    container.innerHTML = '';
+    for (const acct of accountList) {
+      const isActive = acct.orgUuid === activeId;
+      const row = document.createElement('div');
+      row.className = 'account-row' + (isActive ? ' active' : '');
+
+      const dot = document.createElement('span');
+      dot.className = 'account-status-dot';
+      dot.style.background = isActive ? '#4CAF50' : '#555';
+
+      const info = document.createElement('div');
+      info.className = 'account-info';
+
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'account-org-name';
+      nameDiv.textContent = acct.orgName || 'Sem nome';
+
+      const metaDiv = document.createElement('div');
+      metaDiv.className = 'account-meta';
+      const lastSeen = new Date(acct.lastSeen).toLocaleDateString('pt-BR', {
+        day: '2-digit', month: '2-digit', year: '2-digit',
+        hour: '2-digit', minute: '2-digit'
+      });
+      metaDiv.innerHTML = `Visto: ${lastSeen}${isActive ? ' — <strong style="color:#4CAF50">Ativa</strong>' : ''}`;
+
+      info.appendChild(nameDiv);
+      info.appendChild(metaDiv);
+
+      const labelInput = document.createElement('input');
+      labelInput.type = 'text';
+      labelInput.className = 'account-label-input';
+      labelInput.placeholder = 'Apelido';
+      labelInput.value = acct.customLabel || '';
+      labelInput.addEventListener('change', () => {
+        chrome.runtime.sendMessage({
+          action: 'setAccountLabel',
+          orgUuid: acct.orgUuid,
+          label: labelInput.value.trim()
+        });
+      });
+
+      row.appendChild(dot);
+      row.appendChild(info);
+      row.appendChild(labelInput);
+      container.appendChild(row);
+    }
   });
 }
 

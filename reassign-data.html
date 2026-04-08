@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Monitor — Reassociar Dados</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f0f1e; color: #e0e0e0; font-size: 14px; padding: 32px 24px;
+    }
+    .container { max-width: 720px; margin: 0 auto; }
+    h1 { font-size: 20px; color: #fff; margin-bottom: 8px; }
+    h2 { font-size: 15px; color: #a0a0ff; margin: 20px 0 10px; }
+    .desc { font-size: 12px; color: #888; margin-bottom: 20px; line-height: 1.4; }
+    .account-box {
+      background: #1a1a2e; border: 1px solid #252540; border-radius: 10px;
+      padding: 14px; margin-bottom: 12px;
+    }
+    .account-box.active { border-color: #3a5e3a; }
+    .account-name { font-weight: 600; color: #fff; }
+    .account-uuid { font-size: 11px; color: #555; font-family: monospace; }
+    .account-stats { font-size: 12px; color: #aaa; margin-top: 6px; }
+    .entries-preview {
+      font-size: 11px; color: #666; margin-top: 8px; max-height: 150px;
+      overflow-y: auto; font-family: monospace; background: #151528;
+      border-radius: 6px; padding: 8px;
+    }
+    .btn {
+      padding: 10px 20px; background: linear-gradient(135deg, #4040aa, #6060ff);
+      color: white; border: none; border-radius: 8px; font-size: 14px;
+      font-weight: 600; cursor: pointer; margin: 8px 4px 8px 0; transition: opacity 0.2s;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .btn-danger {
+      background: linear-gradient(135deg, #aa4040, #ff4040);
+    }
+    #log {
+      background: #1a1a2e; border: 1px solid #252540; border-radius: 10px;
+      padding: 14px; font-family: monospace; font-size: 12px; white-space: pre-wrap;
+      color: #4CAF50; margin-top: 16px; min-height: 60px;
+    }
+    .orphan-section {
+      background: #2e1a1a; border: 1px solid #5e2525; border-radius: 10px;
+      padding: 14px; margin-bottom: 12px;
+    }
+    .orphan-section .label { color: #ff9800; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Reassociar Dados de Histórico</h1>
+    <p class="desc">
+      Use esta ferramenta para mover registros de histórico entre contas.
+      Dados antigos (antes do suporte multi-conta) podem estar associados à conta errada.
+    </p>
+
+    <div id="accounts-container"></div>
+
+    <h2>Ações</h2>
+    <div id="actions"></div>
+
+    <div id="log">Carregando dados...</div>
+  </div>
+
+  <script src="reassign-data.js"></script>
+</body>
+</html>

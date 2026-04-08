@@ -468,6 +468,78 @@ input[type="range"]::-webkit-slider-thumb:active {
   display: none;
 }
 
+/* -- Accounts List -- */
+.accounts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #252540;
+  transition: background 0.15s;
+}
+
+.account-row.active {
+  border-color: #3a5e3a;
+  background: #1a2e1a;
+}
+
+.account-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.account-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-org-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.account-meta {
+  font-size: 11px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.account-label-input {
+  width: 120px;
+  padding: 4px 8px;
+  background: #151528;
+  color: #a0a0ff;
+  border: 1px solid #3a3a5e;
+  border-radius: 6px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.account-label-input::placeholder {
+  color: #555;
+}
+
+.account-label-input:focus {
+  outline: 1px solid #6060ff;
+  border-color: #6060ff;
+}
+
+.accounts-empty {
+  font-size: 12px;
+  color: #555;
+  padding: 8px 0;
+}
+
 /* -- Footer -- */
 .footer-info {
   text-align: center;

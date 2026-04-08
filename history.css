@@ -194,6 +194,29 @@ canvas {
   background: #252540;
 }
 
+/* Account selector */
+.page-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.account-selector {
+  background: #1a1a2e;
+  color: #a0a0ff;
+  border: 1px solid #3a3a5e;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 200px;
+}
+
+.account-selector:focus {
+  outline: 1px solid #6060ff;
+  border-color: #6060ff;
+}
+
 /* Footer */
 .footer-actions {
   text-align: center;

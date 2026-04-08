@@ -1,9 +1,10 @@
-// history.js
+// history.js — Multi-Account History
 
 const MAX_BARS_PER_PAGE = 21;
 let currentPage = 0;
 let fullLog = [];
 let latestUsage = null;
+let selectedAccountId = null;
 let colorIntervals = [
   { from: 0, color: '#4CAF50' }, { from: 50, color: '#FFC107' },
   { from: 70, color: '#FF9800' }, { from: 90, color: '#F44336' }
@@ -16,7 +17,12 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('chart-next').addEventListener('click', () => { currentPage++; renderPage(); });
   document.getElementById('settings-btn').addEventListener('click', openSettings);
   document.getElementById('clear-log-btn').addEventListener('click', clearLog);
-  loadHistory();
+  document.getElementById('account-selector').addEventListener('change', (e) => {
+    selectedAccountId = e.target.value;
+    loadHistory();
+  });
+
+  loadAccounts().then(() => loadHistory());
 });
 
 // Auto-reload when settings change (e.g. colors)
@@ -39,12 +45,62 @@ async function openSettings() {
 }
 
 function clearLog() {
-  if (!confirm('Tem certeza que deseja limpar todo o histórico de uso?')) return;
-  chrome.runtime.sendMessage({ action: 'clearUsageLog' }, () => {
+  if (selectedAccountId === '__all__') {
+    alert('Selecione uma conta específica para limpar o histórico.');
+    return;
+  }
+  if (!selectedAccountId) return;
+  if (!confirm('Tem certeza que deseja limpar o histórico desta conta?')) return;
+  chrome.runtime.sendMessage({ action: 'clearUsageLog', orgUuid: selectedAccountId }, () => {
     fullLog = [];
     latestUsage = null;
     currentPage = 0;
     renderPage();
+    // Refresh stats
+    loadHistory();
+  });
+}
+
+function loadAccounts() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(['accounts', 'activeAccountId'], (data) => {
+      const accounts = data.accounts || {};
+      const activeId = data.activeAccountId;
+      const selector = document.getElementById('account-selector');
+      selector.innerHTML = '';
+
+      const accountList = Object.values(accounts);
+
+      if (accountList.length <= 1) {
+        // Single account or none — hide selector
+        selector.style.display = 'none';
+        selectedAccountId = activeId || (accountList[0]?.orgUuid) || null;
+        resolve();
+        return;
+      }
+
+      selector.style.display = '';
+
+      // "All accounts" option
+      const allOpt = document.createElement('option');
+      allOpt.value = '__all__';
+      allOpt.textContent = 'Todas as contas';
+      selector.appendChild(allOpt);
+
+      // Individual accounts
+      for (const acct of accountList) {
+        const opt = document.createElement('option');
+        opt.value = acct.orgUuid;
+        const name = acct.customLabel || acct.orgName || acct.orgUuid.slice(0, 8);
+        opt.textContent = acct.orgUuid === activeId ? `${name} (ativa)` : name;
+        selector.appendChild(opt);
+      }
+
+      // Default to active account
+      selectedAccountId = activeId || '__all__';
+      selector.value = selectedAccountId;
+      resolve();
+    });
   });
 }
 
@@ -54,50 +110,99 @@ function loadHistory() {
     if (syncResult.colorIntervals) colorIntervals = syncResult.colorIntervals;
   });
 
-  chrome.storage.local.get({ usageLog: [], latestUsage: null }, (result) => {
-    const log = result.usageLog;
-    const current = result.latestUsage;
+  if (!selectedAccountId) {
+    showEmpty();
+    return;
+  }
 
-    latestUsage = current;
+  if (selectedAccountId === '__all__') {
+    loadAllAccountsHistory();
+  } else {
+    loadSingleAccountHistory(selectedAccountId);
+  }
+}
 
-    // Show chart with all data initially (will update per page)
-    renderChart(log, current);
+function loadSingleAccountHistory(orgUuid) {
+  const logKey = `account:${orgUuid}:usageLog`;
+  const latestKey = `account:${orgUuid}:latestUsage`;
 
-    if (log.length === 0) {
-      document.getElementById('table-container').innerHTML =
-        '<div class="empty-msg">Nenhum registro ainda.<br>O histórico é gravado automaticamente ao final de cada sessão de 5h e ao final de cada semana antes do reset.</div>';
-      return;
+  chrome.storage.local.get({ [logKey]: [], [latestKey]: null }, (result) => {
+    const log = result[logKey] || [];
+    const current = result[latestKey];
+    processHistory(log, current);
+  });
+}
+
+function loadAllAccountsHistory() {
+  chrome.storage.local.get(null, (data) => {
+    // Merge all usageLogs
+    const allLogs = [];
+    for (const key of Object.keys(data)) {
+      if (key.startsWith('account:') && key.endsWith(':usageLog')) {
+        const entries = data[key] || [];
+        for (const entry of entries) {
+          allLogs.push(entry);
+        }
+      }
     }
 
-    // Sort newest first
-    log.sort((a, b) => b.ts - a.ts);
-    fullLog = log;
+    // Use active account's latestUsage for "current" indicator
+    const activeId = data.activeAccountId;
+    const activeLatestKey = activeId ? `account:${activeId}:latestUsage` : null;
+    const current = activeLatestKey ? data[activeLatestKey] : null;
 
-    // -- Stats --
-    const sessions = log.map(e => e.session).filter(v => v !== null && v !== undefined);
-    const weeklies = log.map(e => e.weekly).filter(v => v !== null && v !== undefined);
-
-    const avgSession = sessions.length > 0
-      ? Math.round(sessions.reduce((a, b) => a + b, 0) / sessions.length) : 0;
-    const totalSessions = sessions.length;
-    const avgWeekly = weeklies.length > 0
-      ? Math.round(weeklies.reduce((a, b) => a + b, 0) / weeklies.length) : 0;
-    const uniqueWeeks = new Set(log.map(e => e.weeklyResetsAt).filter(Boolean));
-    const totalWeeks = uniqueWeeks.size;
-
-    document.getElementById('avg-session').textContent = `${avgSession}%`;
-    document.getElementById('avg-session').style.color = resolveColor(avgSession);
-    document.getElementById('total-sessions').textContent = totalSessions;
-    document.getElementById('avg-weekly').textContent = `${avgWeekly}%`;
-    document.getElementById('avg-weekly').style.color = resolveColor(avgWeekly);
-    document.getElementById('total-weeks').textContent = totalWeeks;
-    document.getElementById('stats-summary').classList.remove('hidden');
-
-    // Group log entries by day (preserving order, newest first)
-    buildDayPages();
-    currentPage = 0;
-    renderPage();
+    processHistory(allLogs, current);
   });
+}
+
+function processHistory(log, current) {
+  latestUsage = current;
+
+  // Show chart with all data initially
+  renderChart(log, current);
+
+  if (log.length === 0) {
+    document.getElementById('table-container').innerHTML =
+      '<div class="empty-msg">Nenhum registro ainda.<br>O histórico é gravado automaticamente ao final de cada sessão de 5h e ao final de cada semana antes do reset.</div>';
+    document.getElementById('stats-summary').classList.add('hidden');
+    document.getElementById('pagination').classList.add('hidden');
+    return;
+  }
+
+  // Sort newest first
+  log.sort((a, b) => b.ts - a.ts);
+  fullLog = log;
+
+  // Stats
+  const sessions = log.map(e => e.session).filter(v => v !== null && v !== undefined);
+  const weeklies = log.map(e => e.weekly).filter(v => v !== null && v !== undefined);
+
+  const avgSession = sessions.length > 0
+    ? Math.round(sessions.reduce((a, b) => a + b, 0) / sessions.length) : 0;
+  const totalSessions = sessions.length;
+  const avgWeekly = weeklies.length > 0
+    ? Math.round(weeklies.reduce((a, b) => a + b, 0) / weeklies.length) : 0;
+  const uniqueWeeks = new Set(log.map(e => e.weeklyResetsAt).filter(Boolean));
+  const totalWeeks = uniqueWeeks.size;
+
+  document.getElementById('avg-session').textContent = `${avgSession}%`;
+  document.getElementById('avg-session').style.color = resolveColor(avgSession);
+  document.getElementById('total-sessions').textContent = totalSessions;
+  document.getElementById('avg-weekly').textContent = `${avgWeekly}%`;
+  document.getElementById('avg-weekly').style.color = resolveColor(avgWeekly);
+  document.getElementById('total-weeks').textContent = totalWeeks;
+  document.getElementById('stats-summary').classList.remove('hidden');
+
+  buildDayPages();
+  currentPage = 0;
+  renderPage();
+}
+
+function showEmpty() {
+  document.getElementById('table-container').innerHTML =
+    '<div class="empty-msg">Nenhum registro ainda.</div>';
+  document.getElementById('stats-summary').classList.add('hidden');
+  document.getElementById('pagination').classList.add('hidden');
 }
 
 // Build pages that never split a day across pages
@@ -106,7 +211,6 @@ function buildDayPages() {
   pages = [];
   if (fullLog.length === 0) return;
 
-  // fullLog is sorted newest-first. Group by day (newest-first order).
   const dayGroups = [];
   let currentDay = null;
   let currentGroup = [];
@@ -124,12 +228,6 @@ function buildDayPages() {
   }
   if (currentGroup.length > 0) dayGroups.push(currentGroup);
 
-  // dayGroups is newest-first: [today, yesterday, ...]
-  // We want page 1 = most recent, last page = oldest.
-  // Leftover space should be on the LAST page (oldest), not the first.
-  // So we paginate from the END (oldest) backwards, then reverse.
-
-  // Reverse to oldest-first for packing
   const oldestFirst = [...dayGroups].reverse();
   const packedPages = [];
   let currentPageEntries = [];
@@ -147,8 +245,6 @@ function buildDayPages() {
   }
   if (currentPageEntries.length > 0) packedPages.push(currentPageEntries);
 
-  // packedPages is oldest-first. Reverse so page 1 = most recent.
-  // Sort entries within each page newest-first for the table display.
   pages = packedPages.reverse().map(p => p.sort((a, b) => b.ts - a.ts));
   currentPage = 0;
 }
@@ -158,7 +254,7 @@ function renderPage() {
   const totalPages = pages.length;
   const page = pages[currentPage] || pages[0];
 
-  // -- Table --
+  // Table
   let html = '<table><thead><tr>';
   html += '<th>Hora</th><th>Sessão</th><th>Semanal</th><th>Sonnet</th>';
   html += '</tr></thead><tbody>';
@@ -188,17 +284,16 @@ function renderPage() {
   html += '</tbody></table>';
   document.getElementById('table-container').innerHTML = html;
 
-  // -- Chart --
+  // Chart
   const includeCurrentOnChart = currentPage === 0;
   renderChart(page, includeCurrentOnChart ? latestUsage : null);
 
-  // -- Pagination (both table and chart) --
+  // Pagination
   const isFirst = currentPage === 0;
   const isLast = currentPage >= totalPages - 1;
   const showPagination = totalPages > 1;
   const pageLabel = `Página ${currentPage + 1} de ${totalPages}`;
 
-  // Table pagination
   const pagination = document.getElementById('pagination');
   if (showPagination) {
     pagination.classList.remove('hidden');
@@ -209,7 +304,6 @@ function renderPage() {
     pagination.classList.add('hidden');
   }
 
-  // Chart pagination
   const chartPag = document.getElementById('chart-pagination');
   if (showPagination) {
     chartPag.classList.remove('hidden');
@@ -242,12 +336,11 @@ function renderChart(log, current) {
     const now = new Date();
     const todayKey = now.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
 
-    // Replace stale log entry with live current session data
     if (currentResetAt && byDay[todayKey]) {
       byDay[todayKey] = byDay[todayKey].filter(e => {
         if (!e.resetsAt) return true;
         const diff = Math.abs(new Date(e.resetsAt).getTime() - new Date(currentResetAt).getTime());
-        return diff >= THREE_HOURS; // keep entries from different sessions
+        return diff >= THREE_HOURS;
       });
     }
 
@@ -255,7 +348,7 @@ function renderChart(log, current) {
     byDay[todayKey].push({ value: current.session, isCurrent: true, ts: now.getTime() });
   }
 
-  // Sort bars within each day oldest-first (chronological: left=oldest, right=newest)
+  // Sort bars within each day oldest-first
   for (const key of Object.keys(byDay)) {
     byDay[key].sort((a, b) => a.ts - b.ts);
   }
@@ -300,12 +393,11 @@ function renderChart(log, current) {
   if (totalBars === 0) return;
 
   const numGaps = dayGroups.length - 1;
-  const innerGap = 2; // px between bars within same day
+  const innerGap = 2;
   const barWidth = Math.max(6, Math.min(18, chartW / (totalBars + numGaps * 1.2)));
-  const gapWidth = barWidth * 1.2; // gap between days
+  const gapWidth = barWidth * 1.2;
   const totalInnerGaps = dayGroups.reduce((sum, g) => sum + Math.max(0, g.entries.length - 1), 0);
-  const totalWidth = totalBars * barWidth + numGaps * gapWidth + totalInnerGaps * innerGap;
-  const marginLeft = barWidth; // ensure first bar doesn't sit on the axis
+  const marginLeft = barWidth;
   const startX = padLeft + marginLeft;
 
   const barPositions = [];
@@ -353,7 +445,7 @@ function renderChart(log, current) {
 
   // Bars
   for (const bp of barPositions) {
-    const barH = Math.max(2, (bp.value / 100) * chartH); // min 2px for 0% bars
+    const barH = Math.max(2, (bp.value / 100) * chartH);
     const y = padTop + chartH - barH;
 
     ctx.fillStyle = resolveColor(bp.value);
@@ -364,7 +456,6 @@ function renderChart(log, current) {
     ctx.fill();
     ctx.globalAlpha = 1.0;
 
-    // Value label on top
     ctx.fillStyle = '#ccc';
     ctx.font = '9px sans-serif';
     ctx.textAlign = 'center';
@@ -380,7 +471,7 @@ function renderChart(log, current) {
     ctx.fillText(label, gc.cx, H - 8);
   }
 
-  // Legend via HTML (below canvas)
+  // Legend
   let legend = document.getElementById('chart-legend');
   if (!legend) {
     legend = document.createElement('div');
@@ -409,9 +500,4 @@ function resolveColor(pct) {
     if (pct >= i.from) color = i.color;
   }
   return color;
-}
-
-function pctColorClass(pct) {
-  // Return empty - we use inline style instead
-  return '';
 }

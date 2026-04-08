@@ -42,8 +42,8 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.textContent = 'Verificando...';
     btn.disabled = true;
 
-    // Force re-fetch: clear cached org so it re-discovers
-    chrome.storage.local.remove('orgUuid', () => {
+    // Force re-fetch: clear active account so it re-discovers
+    chrome.storage.local.remove('activeAccountId', () => {
       chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
         setTimeout(() => {
           loadUsage();
@@ -56,42 +56,92 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function loadUsage() {
-  chrome.storage.local.get('latestUsage', (localResult) => {
-    const usage = localResult.latestUsage;
+  chrome.storage.local.get(['latestUsage', 'accounts', 'activeAccountId'], (localResult) => {
+    const accounts = localResult.accounts || {};
+    const activeId = localResult.activeAccountId;
 
-    // Check if not logged in
-    if (!usage || usage.error === 401 || usage.error === 403 || usage.error === 'no_org') {
-      showLoginScreen();
+    console.log('[CM popup] activeAccountId:', activeId);
+    console.log('[CM popup] accounts:', Object.keys(accounts));
+    console.log('[CM popup] latestUsage:', JSON.stringify(localResult.latestUsage)?.slice(0, 150));
+
+    // Render account bar
+    renderAccountBar(accounts, activeId);
+
+    // Try global latestUsage first, then fall back to account-specific
+    const globalUsage = localResult.latestUsage;
+
+    // If global has valid data, use it directly
+    if (globalUsage && !globalUsage.error) {
+      console.log('[CM popup] Using global latestUsage');
+      renderUsageData(globalUsage);
       return;
     }
 
-    if (usage.error) {
-      showContentScreen();
-      showError(usage.error);
+    // If global is error/missing but we have an active account, try its namespaced data
+    if (activeId) {
+      const acctKey = `account:${activeId}:latestUsage`;
+      console.log('[CM popup] Global failed, trying:', acctKey);
+      chrome.storage.local.get(acctKey, (acctResult) => {
+        const acctUsage = acctResult[acctKey];
+        console.log('[CM popup] Account usage:', JSON.stringify(acctUsage)?.slice(0, 150));
+        if (acctUsage && !acctUsage.error) {
+          renderUsageData(acctUsage);
+          return;
+        }
+        console.log('[CM popup] Both sources failed, showing login');
+        showLoginScreen();
+      });
       return;
     }
 
-    showContentScreen();
-    hideError();
-
-    chrome.storage.sync.get({ colorIntervals: null, showSonnet: false }, (settings) => {
-      const intervals = settings.colorIntervals || [
-        { from: 0, color: '#4CAF50' }, { from: 50, color: '#FFC107' },
-        { from: 70, color: '#FF9800' }, { from: 90, color: '#F44336' }
-      ];
-      renderSection('session', usage.session, usage.sessionResetsAt, intervals);
-      renderSection('weekly', usage.weekly, usage.weeklyResetsAt, intervals);
-      renderLastUpdated(usage.fetchedAt);
-
-      const sonnetSection = document.getElementById('sonnet-section');
-      if (settings.showSonnet && usage.sonnet !== null && usage.sonnet !== undefined) {
-        sonnetSection.classList.remove('hidden');
-        renderSection('sonnet', usage.sonnet, usage.sonnetResetsAt, intervals);
-      } else {
-        sonnetSection.classList.add('hidden');
-      }
-    });
+    console.log('[CM popup] No activeId, no valid global, showing login');
+    showLoginScreen();
   });
+}
+
+function renderUsageData(usage) {
+  showContentScreen();
+  hideError();
+
+  chrome.storage.sync.get({ colorIntervals: null, showSonnet: false }, (settings) => {
+    const intervals = settings.colorIntervals || [
+      { from: 0, color: '#4CAF50' }, { from: 50, color: '#FFC107' },
+      { from: 70, color: '#FF9800' }, { from: 90, color: '#F44336' }
+    ];
+    renderSection('session', usage.session, usage.sessionResetsAt, intervals);
+    renderSection('weekly', usage.weekly, usage.weeklyResetsAt, intervals);
+    renderLastUpdated(usage.fetchedAt);
+
+    const sonnetSection = document.getElementById('sonnet-section');
+    if (settings.showSonnet && usage.sonnet !== null && usage.sonnet !== undefined) {
+      sonnetSection.classList.remove('hidden');
+      renderSection('sonnet', usage.sonnet, usage.sonnetResetsAt, intervals);
+    } else {
+      sonnetSection.classList.add('hidden');
+    }
+  });
+}
+
+function renderAccountBar(accounts, activeId) {
+  const bar = document.getElementById('account-bar');
+  const nameEl = document.getElementById('account-name');
+  const countEl = document.getElementById('account-count');
+
+  const accountList = Object.values(accounts);
+  if (accountList.length === 0) {
+    bar.classList.add('hidden');
+    return;
+  }
+
+  bar.classList.remove('hidden');
+  const active = accounts[activeId];
+  nameEl.textContent = active?.customLabel || active?.orgName || 'Conta desconhecida';
+
+  if (accountList.length > 1) {
+    countEl.textContent = `(${accountList.length} contas)`;
+  } else {
+    countEl.textContent = '';
+  }
 }
 
 function showLoginScreen() {

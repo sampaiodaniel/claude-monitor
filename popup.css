@@ -26,6 +26,39 @@ body {
   color: #ffffff;
 }
 
+/* Account bar */
+.account-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px;
+  font-size: 11px;
+  color: #888;
+  border-bottom: 1px solid #2a2a3e;
+}
+
+.account-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4CAF50;
+  flex-shrink: 0;
+}
+
+.account-name {
+  color: #a0a0ff;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.account-count {
+  color: #555;
+  font-size: 10px;
+}
+
 .icon-btn {
   background: none;
   border: none;

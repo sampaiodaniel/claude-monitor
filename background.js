@@ -22,6 +22,56 @@ const CRITICAL_THRESHOLD = 95;
 const CRITICAL_POLL_MINUTES = 1;
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
+// -- Passive org detection via webRequest --
+// Monitors API calls from claude.ai to detect which org the user is actually using.
+// This is the most reliable method: we see the real org UUID in every API call.
+const ORG_URL_REGEX = /claude\.ai\/api\/organizations\/([0-9a-f-]{36})\//;
+let lastDetectedOrgUuid = null;
+
+chrome.webRequest.onBeforeRequest.addListener(
+  (details) => {
+    // Only care about requests from claude.ai tabs (not our own extension fetches)
+    if (details.tabId < 0) return; // -1 = service worker / extension
+
+    const match = details.url.match(ORG_URL_REGEX);
+    if (!match) return;
+
+    const detectedUuid = match[1];
+    if (detectedUuid === lastDetectedOrgUuid) return; // no change
+
+    lastDetectedOrgUuid = detectedUuid;
+    console.log('[CM] webRequest detected active org:', detectedUuid);
+
+    // Update active account if it differs
+    chrome.storage.local.get(['activeAccountId', 'accounts'], (state) => {
+      if (state.activeAccountId === detectedUuid) return;
+
+      console.log('[CM] Switching active account:', state.activeAccountId, '→', detectedUuid);
+
+      // Ensure accounts entry exists
+      const accounts = state.accounts || {};
+      if (!accounts[detectedUuid]) {
+        accounts[detectedUuid] = {
+          orgUuid: detectedUuid,
+          orgName: '',
+          customLabel: '',
+          firstSeen: Date.now(),
+          lastSeen: Date.now()
+        };
+      }
+
+      chrome.storage.local.set({
+        activeAccountId: detectedUuid,
+        accounts
+      }, () => {
+        // Immediately fetch usage for the new active account
+        fetchUsage();
+      });
+    });
+  },
+  { urls: ['https://claude.ai/api/organizations/*'] }
+);
+
 // -- Namespaced storage helpers --
 function accountKey(orgUuid, key) {
   return `account:${orgUuid}:${key}`;
@@ -136,12 +186,20 @@ async function fetchWithCookies(url) {
 }
 
 // -- Detect active account --
-// Fetches /organizations, then probes /usage on each org to find the one that works.
+// Priority: webRequest-detected org > cached activeAccountId > org probe
 // Returns { uuid, orgName, authFailed }
 async function detectActiveAccount() {
   const state = await getLocal(['accounts', 'activeAccountId', 'usableOrgUuid']);
   const cachedId = state.activeAccountId;
-  const cachedUsable = state.usableOrgUuid; // org that last worked for /usage
+
+  // If webRequest already detected the active org, trust it
+  if (lastDetectedOrgUuid && lastDetectedOrgUuid !== cachedId) {
+    console.log('[CM] Using webRequest-detected org:', lastDetectedOrgUuid);
+    return { uuid: lastDetectedOrgUuid, authFailed: false };
+  }
+  if (cachedId && lastDetectedOrgUuid === cachedId) {
+    return { uuid: cachedId, authFailed: false };
+  }
 
   try {
     const resp = await fetchWithCookies('https://claude.ai/api/organizations');
