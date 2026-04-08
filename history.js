@@ -369,6 +369,8 @@ function renderChart(log, current) {
   }
 
   section.classList.remove('hidden');
+  document.getElementById('chart-section').querySelector('h2').textContent =
+    'Uso por sessão (por dia)';
 
   const dpr = window.devicePixelRatio || 1;
   const rect = canvas.getBoundingClientRect();
