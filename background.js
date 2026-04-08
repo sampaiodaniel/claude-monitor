@@ -252,6 +252,25 @@ async function detectActiveAccount() {
     // Merge legacy accounts (keyed by org UUID) into user-keyed account
     await mergeLegacyAccounts(accounts, userUuid, email, displayName);
 
+    // Clean up orphan accounts: no email, not the current user
+    for (const [id, acct] of Object.entries(accounts)) {
+      if (id === userUuid) continue;
+      if (!acct.email) {
+        console.log('[CM] Removing orphan account without email:', id.slice(0, 8));
+        // Clean up storage keys
+        await new Promise(resolve =>
+          chrome.storage.local.remove([
+            accountKey(id, 'usageLog'),
+            accountKey(id, 'latestUsage'),
+            accountKey(id, 'previousSession'),
+            accountKey(id, 'lastTrackedResetAt'),
+            accountKey(id, 'notifiedState')
+          ], resolve)
+        );
+        delete accounts[id];
+      }
+    }
+
     // Detect account switch
     if (cachedId && cachedId !== userUuid) {
       console.log('[CM] Account switch detected:', cachedId, '->', userUuid);
