@@ -184,104 +184,76 @@ async function fetchWithCookies(url) {
 }
 
 // -- Detect active account --
-// Always queries /organizations to detect the REAL logged-in account.
-// Different users (daniel vs robot2) have different sessions/cookies,
-// so the API only returns orgs for the currently logged-in user.
-// Returns { uuid, orgName, authFailed }
+// Uses /api/account to identify the LOGGED-IN USER (not just org).
+// Multiple users (daniel, robot2) can belong to the same org but have
+// separate sessions, usage limits, and cookies.
+// The accountId is the USER uuid (not org uuid). The org uuid is stored
+// alongside for API calls.
+// Returns { uuid (user), orgUuid, authFailed }
 async function detectActiveAccount() {
   const state = await getLocal(['accounts', 'activeAccountId']);
   const cachedId = state.activeAccountId;
 
   try {
-    const resp = await fetchWithCookies('https://claude.ai/api/organizations');
-    console.log('[CM] /organizations status:', resp.status);
+    // /api/account returns the logged-in user with their email and org memberships
+    const resp = await fetchWithCookies('https://claude.ai/api/account');
+    console.log('[CM] /api/account status:', resp.status);
 
     if (!resp.ok) {
       if (resp.status === 401 || resp.status === 403) {
         console.log('[CM] Auth failed, need login');
-        return { uuid: null, authFailed: true };
+        return { uuid: null, orgUuid: null, authFailed: true };
       }
       console.log('[CM] API error, using cache:', cachedId);
-      return { uuid: cachedId || null, authFailed: false };
+      const cachedAcct = state.accounts?.[cachedId];
+      return { uuid: cachedId || null, orgUuid: cachedAcct?.orgUuid || null, authFailed: false };
     }
 
-    const orgs = await resp.json();
-    console.log('[CM] Orgs:', orgs.map(o => `${o.name}(${o.uuid.slice(0,8)})`).join(', '));
+    const acct = await resp.json();
+    const userUuid = acct.uuid;
+    const email = acct.email_address || '';
+    const displayName = acct.full_name || acct.display_name || email.split('@')[0];
 
-    if (!orgs || orgs.length === 0) {
-      return { uuid: cachedId || null, authFailed: false };
-    }
+    // Get org uuid from first membership
+    const orgUuid = acct.memberships?.[0]?.organization?.uuid || null;
+    const orgName = acct.memberships?.[0]?.organization?.name || '';
 
-    // Prioritize orgs: Teams/raven with "chat" > personal with "chat" > API-only
-    // This ensures the active chat org is selected, not an API-only org
-    const orderedOrgs = [...orgs].sort((a, b) => {
-      const aChat = (a.capabilities || []).includes('chat');
-      const bChat = (b.capabilities || []).includes('chat');
-      const aRaven = a.raven_type === 'team';
-      const bRaven = b.raven_type === 'team';
-
-      // Teams (raven) with chat first
-      if (aRaven && aChat && !(bRaven && bChat)) return -1;
-      if (bRaven && bChat && !(aRaven && aChat)) return 1;
-      // Then any chat org
-      if (aChat && !bChat) return -1;
-      if (bChat && !aChat) return 1;
-      return 0;
-    });
-
-    console.log('[CM] Org priority:', orderedOrgs.map(o =>
-      `${o.name}(${o.uuid.slice(0,8)}) caps=${(o.capabilities||[]).join(',')} raven=${o.raven_type||'none'}`
-    ).join(' → '));
-
-    let usableOrg = null;
-    for (const org of orderedOrgs) {
-      const usageResp = await fetchWithCookies(
-        `https://claude.ai/api/organizations/${org.uuid}/usage`
-      );
-      console.log('[CM] Probe /usage for', org.name, `(${org.uuid.slice(0,8)})`, '→', usageResp.status);
-      if (usageResp.ok) {
-        usableOrg = org;
-        break;
-      }
-    }
-
-    if (!usableOrg) {
-      console.log('[CM] No org returned 200 for /usage');
-      // All orgs returned 403 — use cached if available
-      return { uuid: cachedId || null, authFailed: false };
-    }
-
-    const uuid = usableOrg.uuid;
-    const orgName = usableOrg.name || '';
-    console.log('[CM] Usable org:', orgName, uuid.slice(0, 8));
+    console.log('[CM] Logged-in user:', email, `(${userUuid.slice(0, 8)})`, 'org:', orgName, `(${orgUuid?.slice(0, 8)})`);
 
     const accounts = state.accounts || {};
 
-    // Upsert account in registry
-    if (!accounts[uuid]) {
-      accounts[uuid] = {
-        orgUuid: uuid,
+    // Upsert account using USER uuid as key (not org uuid)
+    if (!accounts[userUuid]) {
+      accounts[userUuid] = {
+        orgUuid,
         orgName,
+        userUuid,
+        email,
         customLabel: '',
+        displayName,
         firstSeen: Date.now(),
         lastSeen: Date.now()
       };
     } else {
-      accounts[uuid].orgName = orgName;
-      accounts[uuid].lastSeen = Date.now();
+      accounts[userUuid].orgUuid = orgUuid;
+      accounts[userUuid].orgName = orgName;
+      accounts[userUuid].email = email;
+      accounts[userUuid].displayName = displayName;
+      accounts[userUuid].lastSeen = Date.now();
     }
 
     // Detect account switch
-    if (cachedId && cachedId !== uuid) {
-      console.log('[CM] Account switch detected:', cachedId, '->', uuid);
-      await handleAccountSwitch(cachedId, uuid);
+    if (cachedId && cachedId !== userUuid) {
+      console.log('[CM] Account switch detected:', cachedId, '->', userUuid);
+      await handleAccountSwitch(cachedId, userUuid);
     }
 
-    await setLocal({ accounts, activeAccountId: uuid });
-    return { uuid, authFailed: false };
+    await setLocal({ accounts, activeAccountId: userUuid });
+    return { uuid: userUuid, orgUuid, authFailed: false };
   } catch (e) {
     console.error('[CM] detectActiveAccount error:', e.message);
-    return { uuid: cachedId || null, authFailed: false };
+    const cachedAcct = state.accounts?.[cachedId];
+    return { uuid: cachedId || null, orgUuid: cachedAcct?.orgUuid || null, authFailed: false };
   }
 }
 
@@ -340,17 +312,18 @@ async function fetchUsage() {
   }
 
   // No account at all (never logged in)
-  if (!detected.uuid) {
+  if (!detected.uuid || !detected.orgUuid) {
     console.log('[CM] No uuid at all, showing login');
     setBadgeError();
     saveLatest({ error: 'no_org' }, null);
     return;
   }
 
-  const orgUuid = detected.uuid;
+  const userUuid = detected.uuid;    // user identifier (for storage namespacing)
+  const orgUuid = detected.orgUuid;  // org identifier (for API calls)
   const settings = await getSettings();
   const url = `https://claude.ai/api/organizations/${orgUuid}/usage`;
-  console.log('[CM] Fetching usage for:', orgUuid);
+  console.log('[CM] Fetching usage for user:', userUuid.slice(0, 8), 'org:', orgUuid.slice(0, 8));
 
   try {
     const resp = await fetchWithCookies(url);
@@ -372,10 +345,10 @@ async function fetchUsage() {
     const usage = parseUsage(data);
     console.log('[CM] Usage parsed:', JSON.stringify(usage));
 
-    saveLatest(usage, orgUuid);
+    saveLatest(usage, userUuid);
     updateBadge(usage, settings);
-    await checkAlerts(usage, settings, orgUuid);
-    await maybeLogUsage(usage, settings, orgUuid);
+    await checkAlerts(usage, settings, userUuid);
+    await maybeLogUsage(usage, settings, userUuid);
 
     // Turbo mode: poll every 1 min when session >= 95%
     const isCritical = usage.session !== null && usage.session >= CRITICAL_THRESHOLD;

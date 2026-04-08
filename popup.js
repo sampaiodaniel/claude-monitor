@@ -138,7 +138,7 @@ function renderAccountBar(accounts, activeId) {
 
   bar.classList.remove('hidden');
   const active = accounts[activeId];
-  nameEl.textContent = active?.customLabel || active?.orgName || 'Conta desconhecida';
+  nameEl.textContent = active?.customLabel || active?.email || active?.displayName || active?.orgName || 'Conta desconhecida';
 
   if (accountList.length > 1) {
     countEl.textContent = `(${accountList.length} contas)`;
@@ -150,7 +150,7 @@ function renderAccountBar(accounts, activeId) {
       if (acct.orgUuid === activeId) continue;
       const opt = document.createElement('div');
       opt.className = 'account-option';
-      opt.innerHTML = `<span class="opt-dot"></span>${acct.customLabel || acct.orgName || acct.orgUuid.slice(0, 8)}`;
+      opt.innerHTML = `<span class="opt-dot"></span>${acct.customLabel || acct.email || acct.displayName || acct.orgName || acct.orgUuid?.slice(0, 8) || '?'}`;
       opt.addEventListener('click', () => switchAccount(acct.orgUuid));
       dropdown.appendChild(opt);
     }
