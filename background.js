@@ -211,14 +211,14 @@ async function detectActiveAccount() {
         return { uuid: null, authFailed: true };
       }
       console.log('[CM] API error, using cache:', cachedId);
-      return { uuid: cachedUsable || cachedId || null, authFailed: false };
+      return { uuid: cachedId || null, authFailed: false };
     }
 
     const orgs = await resp.json();
     console.log('[CM] Orgs:', orgs.map(o => `${o.name}(${o.uuid.slice(0,8)})`).join(', '));
 
     if (!orgs || orgs.length === 0) {
-      return { uuid: cachedUsable || cachedId || null, authFailed: false };
+      return { uuid: cachedId || null, authFailed: false };
     }
 
     // Prioritize orgs: Teams/raven with "chat" > personal with "chat" > API-only
@@ -270,7 +270,7 @@ async function detectActiveAccount() {
     if (!usableOrg) {
       console.log('[CM] No org returned 200 for /usage');
       // All orgs returned 403 — use cached if available
-      return { uuid: cachedUsable || cachedId || null, authFailed: false };
+      return { uuid: cachedId || null, authFailed: false };
     }
 
     const uuid = usableOrg.uuid;
@@ -303,7 +303,7 @@ async function detectActiveAccount() {
     return { uuid, authFailed: false };
   } catch (e) {
     console.error('[CM] detectActiveAccount error:', e.message);
-    return { uuid: cachedUsable || cachedId || null, authFailed: false };
+    return { uuid: cachedId || null, authFailed: false };
   }
 }
 
