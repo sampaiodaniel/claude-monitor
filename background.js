@@ -242,6 +242,9 @@ async function detectActiveAccount() {
       accounts[userUuid].lastSeen = Date.now();
     }
 
+    // Merge legacy accounts (keyed by org UUID) into user-keyed account
+    await mergeLegacyAccounts(accounts, userUuid, email, displayName);
+
     // Detect account switch
     if (cachedId && cachedId !== userUuid) {
       console.log('[CM] Account switch detected:', cachedId, '->', userUuid);
@@ -254,6 +257,73 @@ async function detectActiveAccount() {
     console.error('[CM] detectActiveAccount error:', e.message);
     const cachedAcct = state.accounts?.[cachedId];
     return { uuid: cachedId || null, orgUuid: cachedAcct?.orgUuid || null, authFailed: false };
+  }
+}
+
+// -- Merge legacy accounts (org-UUID-keyed) into user-UUID-keyed accounts --
+// Matches by: customLabel ~= email prefix or displayName, or orgUuid match
+async function mergeLegacyAccounts(accounts, userUuid, email, displayName) {
+  const emailPrefix = email.split('@')[0].toLowerCase(); // e.g. "robot2"
+
+  for (const [oldId, acct] of Object.entries(accounts)) {
+    if (oldId === userUuid) continue; // skip self
+    if (acct.email) continue; // already a user-keyed account, skip
+
+    // Match by label or name similarity
+    const label = (acct.customLabel || '').toLowerCase();
+    const name = (acct.displayName || acct.orgName || '').toLowerCase();
+    const isMatch = (
+      label === emailPrefix ||
+      label === displayName.toLowerCase() ||
+      name === emailPrefix ||
+      oldId === acct.orgUuid // old account was keyed by org UUID
+    );
+
+    if (!isMatch) continue;
+
+    console.log('[CM] Merging legacy account', oldId.slice(0, 8), '→', userUuid.slice(0, 8));
+
+    // Migrate usage log
+    const oldLogKey = accountKey(oldId, 'usageLog');
+    const newLogKey = accountKey(userUuid, 'usageLog');
+    const data = await getLocal([oldLogKey, newLogKey]);
+    const oldLog = data[oldLogKey] || [];
+    const newLog = data[newLogKey] || [];
+
+    if (oldLog.length > 0) {
+      // Merge logs, deduplicate by timestamp proximity
+      const merged = [...newLog];
+      for (const entry of oldLog) {
+        const isDupe = merged.some(m => Math.abs(m.ts - entry.ts) < 60000);
+        if (!isDupe) merged.push(entry);
+      }
+      merged.sort((a, b) => a.ts - b.ts);
+
+      await setLocal({ [newLogKey]: merged });
+      console.log('[CM] Migrated', oldLog.length, 'log entries from', oldId.slice(0, 8));
+    }
+
+    // Preserve customLabel if the new account doesn't have one
+    if (!accounts[userUuid].customLabel && acct.customLabel) {
+      accounts[userUuid].customLabel = acct.customLabel;
+    }
+    // Preserve firstSeen
+    if (acct.firstSeen && acct.firstSeen < accounts[userUuid].firstSeen) {
+      accounts[userUuid].firstSeen = acct.firstSeen;
+    }
+
+    // Remove legacy account and its storage keys
+    delete accounts[oldId];
+    await new Promise(resolve =>
+      chrome.storage.local.remove([
+        oldLogKey,
+        accountKey(oldId, 'latestUsage'),
+        accountKey(oldId, 'previousSession'),
+        accountKey(oldId, 'lastTrackedResetAt'),
+        accountKey(oldId, 'notifiedState')
+      ], resolve)
+    );
+    console.log('[CM] Removed legacy account', oldId.slice(0, 8));
   }
 }
 
