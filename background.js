@@ -22,6 +22,12 @@ const CRITICAL_THRESHOLD = 95;
 const CRITICAL_POLL_MINUTES = 1;
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
+// Transient failure resilience: keep last-known badge on sporadic network errors.
+// Only escalate to "?" after consecutive failures OR when cached data goes stale.
+const MAX_TRANSIENT_FAILURES = 3;
+const STALE_CACHE_MS = 30 * 60 * 1000;
+let consecutiveFailures = 0;
+
 // -- Passive org detection via webRequest --
 // Monitors API calls from claude.ai to detect which org the user is actually using.
 // When a DIFFERENT org is seen, triggers fetchUsage() to re-detect the account via /api/account.
@@ -465,11 +471,12 @@ async function fetchUsage() {
     return;
   }
 
-  // No account at all (never logged in)
+  // No account at all (never logged in) — or transient detection failure
   if (!detected.uuid || !detected.orgUuid) {
-    console.log('[CM] No uuid at all, showing login');
-    setBadgeError();
-    saveLatest({ error: 'no_org' }, null);
+    console.log('[CM] No uuid/orgUuid, may be transient');
+    await handleTransientFailure(detected.uuid, 'no_uuid_or_org');
+    // Only mark storage as error if we have no uuid at all (true logged-out state)
+    if (!detected.uuid) saveLatest({ error: 'no_org' }, null);
     return;
   }
 
@@ -488,8 +495,11 @@ async function fetchUsage() {
       if (resp.status === 401 || resp.status === 403) {
         // Auth failed — clear stale latestUsage so popup can recover on next success
         saveLatest({ error: 'auth_failed' }, userUuid);
+        consecutiveFailures = 0;
+        setBadgeError();
+      } else {
+        await handleTransientFailure(userUuid, `http_${resp.status}`);
       }
-      setBadgeError();
       return;
     }
 
@@ -499,6 +509,7 @@ async function fetchUsage() {
 
     saveLatest(usage, userUuid);
     updateBadge(usage, settings);
+    consecutiveFailures = 0;
     await checkAlerts(usage, settings, userUuid);
     await maybeLogUsage(usage, settings, userUuid);
 
@@ -512,7 +523,7 @@ async function fetchUsage() {
     }
   } catch (err) {
     console.error('[CM] fetchUsage network error:', err.message);
-    setBadgeError();
+    await handleTransientFailure(userUuid, `network: ${err.message}`);
   }
 }
 
@@ -554,6 +565,38 @@ function updateBadge(usage, settings) {
 function setBadgeError() {
   chrome.action.setBadgeText({ text: '?' });
   chrome.action.setBadgeBackgroundColor({ color: GRAY });
+}
+
+// Transient failure handler: keep last-known badge when cache is fresh
+// and we haven't exceeded the consecutive-failure budget.
+async function handleTransientFailure(userUuid, reason) {
+  consecutiveFailures++;
+  console.log(`[CM] Transient failure ${consecutiveFailures}/${MAX_TRANSIENT_FAILURES}: ${reason}`);
+
+  if (consecutiveFailures >= MAX_TRANSIENT_FAILURES) {
+    console.log('[CM] Too many consecutive failures, showing "?"');
+    setBadgeError();
+    return;
+  }
+
+  if (!userUuid) {
+    setBadgeError();
+    return;
+  }
+
+  const key = accountKey(userUuid, 'latestUsage');
+  const cache = await getLocal(key);
+  const cached = cache[key];
+  const fresh = cached && !cached.error && cached.fetchedAt &&
+    (Date.now() - cached.fetchedAt) < STALE_CACHE_MS;
+
+  if (!fresh) {
+    console.log('[CM] No fresh cache, showing "?"');
+    setBadgeError();
+    return;
+  }
+
+  console.log('[CM] Keeping last-known badge (cache still fresh)');
 }
 
 // -- Alerts (Notifications) -- namespaced per account --
