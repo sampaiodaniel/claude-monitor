@@ -24,7 +24,9 @@ const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 
 // -- Passive org detection via webRequest --
 // Monitors API calls from claude.ai to detect which org the user is actually using.
-// This is the most reliable method: we see the real org UUID in every API call.
+// When a DIFFERENT org is seen, triggers fetchUsage() to re-detect the account via /api/account.
+// IMPORTANT: This listener does NOT modify activeAccountId directly — that's done
+// exclusively by detectActiveAccount() using the user UUID from /api/account.
 const ORG_URL_REGEX = /claude\.ai\/api\/organizations\/([0-9a-f-]{36})\//;
 let lastDetectedOrgUuid = null;
 
@@ -40,35 +42,45 @@ chrome.webRequest.onBeforeRequest.addListener(
     if (detectedUuid === lastDetectedOrgUuid) return; // no change
 
     lastDetectedOrgUuid = detectedUuid;
-    console.log('[CM] webRequest detected active org:', detectedUuid);
+    console.log('[CM] webRequest detected org change:', detectedUuid.slice(0, 8));
 
+    // Check if this org differs from the current active account's org
     chrome.storage.local.get(['activeAccountId', 'accounts'], (state) => {
-      if (state.activeAccountId === detectedUuid) return;
+      const activeAcct = state.accounts?.[state.activeAccountId];
+      const currentOrg = activeAcct?.orgUuid;
 
-      console.log('[CM] Auto-switching active account:', state.activeAccountId, '→', detectedUuid);
+      if (currentOrg === detectedUuid) return; // same org, no action needed
 
-      // Ensure accounts entry exists
-      const accounts = state.accounts || {};
-      if (!accounts[detectedUuid]) {
-        accounts[detectedUuid] = {
-          orgUuid: detectedUuid,
-          orgName: '',
-          customLabel: '',
-          firstSeen: Date.now(),
-          lastSeen: Date.now()
-        };
-      }
-
-      chrome.storage.local.set({
-        activeAccountId: detectedUuid,
-        accounts
-      }, () => {
-        fetchUsage();
-      });
+      console.log('[CM] Org change detected:', currentOrg?.slice(0, 8), '→', detectedUuid.slice(0, 8), '— triggering refresh');
+      // Don't set activeAccountId here — let detectActiveAccount() handle it via /api/account
+      fetchUsage();
     });
   },
   { urls: ['https://claude.ai/api/organizations/*'] }
 );
+
+// -- Cookie change detection --
+// Detects login/logout immediately when session cookies change on claude.ai.
+// This catches same-org account switches that webRequest can't detect.
+let cookieDebounceTimer = null;
+chrome.cookies.onChanged.addListener((changeInfo) => {
+  const cookie = changeInfo.cookie;
+  if (cookie.domain !== '.claude.ai' && cookie.domain !== 'claude.ai') return;
+  // Skip irrelevant cookies (tracking, analytics, etc.)
+  if (cookie.name.startsWith('_ga') || cookie.name.startsWith('_fbp')) return;
+
+  // Only react to actual value changes (cause: 'explicit' = user/server set, 'expired' = cleanup)
+  if (changeInfo.cause === 'evicted') return;
+
+  console.log('[CM] Cookie changed:', cookie.name, changeInfo.removed ? '(removed)' : '(set)', 'cause:', changeInfo.cause);
+
+  // Debounce: multiple cookies change at once during login/logout
+  clearTimeout(cookieDebounceTimer);
+  cookieDebounceTimer = setTimeout(() => {
+    console.log('[CM] Cookie change debounced — triggering account re-detection');
+    fetchUsage();
+  }, 3000);
+});
 
 // -- Namespaced storage helpers --
 function accountKey(orgUuid, key) {
@@ -214,11 +226,55 @@ async function detectActiveAccount() {
     const email = acct.email_address || '';
     const displayName = acct.full_name || acct.display_name || email.split('@')[0];
 
-    // Get org uuid from first membership
-    const orgUuid = acct.memberships?.[0]?.organization?.uuid || null;
-    const orgName = acct.memberships?.[0]?.organization?.name || '';
+    // Find an org that has /usage access — not all memberships grant it.
+    // Try webRequest-detected org first (most likely the active one), then probe all.
+    const memberships = acct.memberships || [];
+    const allOrgs = memberships.map(m => ({
+      uuid: m.organization?.uuid,
+      name: m.organization?.name || ''
+    })).filter(o => o.uuid);
 
-    console.log('[CM] Logged-in user:', email, `(${userUuid.slice(0, 8)})`, 'org:', orgName, `(${orgUuid?.slice(0, 8)})`);
+    console.log('[CM] Logged-in user:', email, `(${userUuid.slice(0, 8)})`, 'memberships:', allOrgs.length);
+
+    let orgUuid = null;
+    let orgName = '';
+
+    // Try webRequest-detected org first (it's the one the browser is actually using)
+    if (lastDetectedOrgUuid && allOrgs.some(o => o.uuid === lastDetectedOrgUuid)) {
+      const probeUrl = `https://claude.ai/api/organizations/${lastDetectedOrgUuid}/usage`;
+      try {
+        const probeResp = await fetchWithCookies(probeUrl);
+        if (probeResp.ok) {
+          orgUuid = lastDetectedOrgUuid;
+          orgName = allOrgs.find(o => o.uuid === lastDetectedOrgUuid)?.name || '';
+          console.log('[CM] webRequest org works:', orgName, `(${orgUuid.slice(0, 8)})`);
+        }
+      } catch (_) {}
+    }
+
+    // If webRequest org didn't work, probe all memberships
+    if (!orgUuid) {
+      for (const org of allOrgs) {
+        const probeUrl = `https://claude.ai/api/organizations/${org.uuid}/usage`;
+        try {
+          const probeResp = await fetchWithCookies(probeUrl);
+          console.log('[CM] Probing org', org.name, `(${org.uuid.slice(0, 8)}):`, probeResp.status);
+          if (probeResp.ok) {
+            orgUuid = org.uuid;
+            orgName = org.name;
+            break;
+          }
+        } catch (_) {
+          console.log('[CM] Probe error for', org.uuid.slice(0, 8));
+        }
+      }
+    }
+
+    if (!orgUuid) {
+      console.log('[CM] No org with /usage access found among', allOrgs.length, 'memberships');
+    } else {
+      console.log('[CM] Using org:', orgName, `(${orgUuid.slice(0, 8)})`);
+    }
 
     const accounts = state.accounts || {};
 
@@ -428,12 +484,10 @@ async function fetchUsage() {
     console.log('[CM] Usage API status:', resp.status);
 
     if (!resp.ok) {
-      // detectActiveAccount already probed /usage, so this shouldn't happen often.
-      // If it does (race condition, session expired mid-request), just show error badge
-      // but DON'T clear activeAccountId — the account is still valid.
       console.log('[CM] Usage fetch failed:', resp.status);
       if (resp.status === 401 || resp.status === 403) {
-        // Auth failed for this org — next poll will re-detect
+        // Auth failed — clear stale latestUsage so popup can recover on next success
+        saveLatest({ error: 'auth_failed' }, userUuid);
       }
       setBadgeError();
       return;
@@ -457,7 +511,7 @@ async function fetchUsage() {
       await setLocal({ currentPollMinutes: currentInterval });
     }
   } catch (err) {
-    // Network error — don't overwrite valid cached data
+    console.error('[CM] fetchUsage network error:', err.message);
     setBadgeError();
   }
 }

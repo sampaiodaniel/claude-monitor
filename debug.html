@@ -11,13 +11,16 @@
     button:hover { background: #3a3a5e; }
     .danger { border-color: #e74c4c; color: #e74c4c; }
     .danger:hover { background: #3a1a1a; }
+    .primary { border-color: #4CAF50; color: #4CAF50; }
+    .primary:hover { background: #1a3a1a; }
   </style>
 </head>
 <body>
   <h2>Claude Monitor - Debug</h2>
+  <button id="btn-diagnostic" class="primary">Diagnóstico Completo</button>
   <button id="btn-state">Ver Estado Atual</button>
-  <button id="btn-clear-cache" class="danger">Limpar Cache de Conta (forçar re-detecção)</button>
   <button id="btn-force-fetch">Forçar Fetch Agora</button>
+  <button id="btn-clear-cache" class="danger">Limpar Cache (forçar re-detecção)</button>
   <pre id="output">Clique num botão acima...</pre>
   <script src="debug.js"></script>
 </body>

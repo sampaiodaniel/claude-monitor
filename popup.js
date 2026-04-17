@@ -55,10 +55,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+let autoRetried = false;
+
 function loadUsage() {
   chrome.storage.local.get(['latestUsage', 'accounts', 'activeAccountId'], (localResult) => {
     const accounts = localResult.accounts || {};
     const activeId = localResult.activeAccountId;
+    const activeAcct = accounts[activeId];
 
     console.log('[CM popup] activeAccountId:', activeId);
     console.log('[CM popup] accounts:', Object.keys(accounts));
@@ -88,6 +91,39 @@ function loadUsage() {
           renderUsageData(acctUsage);
           return;
         }
+
+        // Account detected (email shows) but no valid usage data — auto-retry once
+        if (activeAcct && activeAcct.email && !autoRetried) {
+          console.log('[CM popup] Account exists but no usage — auto-refreshing...');
+          autoRetried = true;
+          // Try background refresh first
+          chrome.runtime.sendMessage({ action: 'refreshUsage' }, () => {
+            setTimeout(() => {
+              // Re-check if background succeeded
+              chrome.storage.local.get(['latestUsage'], (check) => {
+                if (check.latestUsage && !check.latestUsage.error) {
+                  loadUsage();
+                  return;
+                }
+                // Background failed — try direct fetch from popup context
+                console.log('[CM popup] Background fetch failed, trying direct fetch...');
+                directFetchUsage(activeAcct.orgUuid).then((usage) => {
+                  if (usage) {
+                    renderUsageData(usage);
+                    // Save to storage so it persists
+                    const updates = { latestUsage: usage };
+                    updates[`account:${activeId}:latestUsage`] = usage;
+                    chrome.storage.local.set(updates);
+                  } else {
+                    showLoginScreen();
+                  }
+                });
+              });
+            }, 2500);
+          });
+          return;
+        }
+
         console.log('[CM popup] Both sources failed, showing login');
         showLoginScreen();
       });
@@ -208,6 +244,39 @@ function formatTimeUntil(isoString) {
   }
   if (hours > 0) return `${hours}h ${minutes}min`;
   return `${minutes}min`;
+}
+
+// Direct fetch from popup context (bypasses service worker cookie issues)
+async function directFetchUsage(orgUuid) {
+  if (!orgUuid) return null;
+  try {
+    const cookies = await chrome.cookies.getAll({ domain: 'claude.ai' });
+    const cookieHeader = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    const url = `https://claude.ai/api/organizations/${orgUuid}/usage`;
+    console.log('[CM popup] Direct fetch:', url);
+
+    const resp = await fetch(url, {
+      credentials: 'include',
+      headers: cookieHeader ? { 'Cookie': cookieHeader } : {}
+    });
+    console.log('[CM popup] Direct fetch status:', resp.status);
+
+    if (!resp.ok) return null;
+
+    const data = await resp.json();
+    return {
+      session: data.five_hour?.utilization ?? null,
+      sessionResetsAt: data.five_hour?.resets_at ?? null,
+      weekly: data.seven_day?.utilization ?? null,
+      weeklyResetsAt: data.seven_day?.resets_at ?? null,
+      sonnet: data.seven_day_sonnet?.utilization ?? null,
+      sonnetResetsAt: data.seven_day_sonnet?.resets_at ?? null,
+      fetchedAt: Date.now()
+    };
+  } catch (e) {
+    console.error('[CM popup] Direct fetch error:', e.message);
+    return null;
+  }
 }
 
 function showError(err) {
