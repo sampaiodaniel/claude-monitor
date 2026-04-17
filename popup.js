@@ -53,6 +53,14 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
   });
+
+  // Live-refresh popup when background polling writes new data
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes.latestUsage || changes.activeAccountId || changes.accounts) {
+      loadUsage();
+    }
+  });
 });
 
 let autoRetried = false;
